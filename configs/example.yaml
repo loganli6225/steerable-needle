@@ -1,0 +1,23 @@
+# Example experiment config.
+# Principle: every result must be reproducible from a config + a seed.
+# Nothing about an experiment should live only in a notebook cell.
+
+seed: 42
+
+# Ground-truth needle/tissue parameters (what the simulator uses).
+true_needle:
+  kappa: 0.02          # 1/50 mm^-1
+
+# What the planner/filter BELIEVE (deliberately separable from truth).
+# Start identical to true_needle; introduce mismatch later to get results.
+model_needle:
+  kappa: 0.02
+
+simulation:
+  dt: 0.1              # timestep [s]
+  max_steps: 500
+
+# Placeholders for later phases:
+environment: null      # Task 2
+planner: null          # Task 3
+estimator: null        # Phase 3

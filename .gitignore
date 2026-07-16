@@ -1,0 +1,36 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.eggs/
+build/
+dist/
+.venv/
+venv/
+env/
+
+# Testing / tooling
+.pytest_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+
+# Notebooks
+.ipynb_checkpoints/
+
+# Experiment outputs — keep the folder, ignore the (large, regenerable) results.
+# We track results/.gitkeep but not the generated artifacts.
+experiments/results/*
+!experiments/results/.gitkeep
+
+# Trained models / data (large binaries do not belong in git)
+*.pt
+*.pth
+*.ckpt
+data/
+*.h5
+
+# OS / editor
+.DS_Store
+.idea/
+.vscode/
