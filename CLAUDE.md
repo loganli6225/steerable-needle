@@ -10,7 +10,7 @@ reproducible benchmarking. Personal research project (not coursework).
 
 - Install dev env: `pip install -e ".[dev]"`
 - Run tests: `pytest -q`
-- Run a single test: `pytest tests/test_needle_model.py::test_duty_cycle_halves_curvature -v`
+- Run a single test: `pytest tests/test_needle_model.py::test_duty_cycle_scales_curvature -v`
 - Generate Task 1 figures: `python scripts/demo_needle_model.py`
 - Lint: `ruff check src tests`
 - Format: `black src tests`
@@ -62,11 +62,13 @@ line in an interview or a grad school conversation.
 
 ## Current status
 
-Phase 0 complete (scaffolding). Task 1 in progress: implement `step` with RK4
-and get the three acceptance tests in `tests/test_needle_model.py` green.
+Phase 0 complete (scaffolding). Task 1: `step` implemented with RK4;
+`tests/test_needle_model.py` green.
 
-The duty-cycle test is the important one: effective curvature ~kappa/2 must
-EMERGE from flipping the bevel direction, not be hardcoded.
+The duty-cycle test is the important one: for a fraction p of steps with
+b=+1, effective curvature kappa_eff = kappa*(2p - 1) must EMERGE from
+flipping the bevel direction, not be hardcoded. (p=0.5 -> straight line,
+p=0.75 -> kappa/2.)
 
 ## Reference
 
