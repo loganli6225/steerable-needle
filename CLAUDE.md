@@ -17,19 +17,6 @@ reproducible benchmarking. Personal research project (not coursework).
 
 Run `pytest -q` before every commit.
 
-## Architecture
-
-See `docs/architecture.md` for the full module map. Summary:
-
-- `src/needlesim/models/` — needle kinematics. `step(state, control, dt, params) -> State`.
-  MUST be pure: no mutation, no side effects, no plotting. The planner calls
-  it thousands of times per second on hypothetical states.
-- `src/needlesim/environments/` — obstacle maps + collision checking.
-- `src/needlesim/planning/` — RRT, RRT*, learned planners.
-- `src/needlesim/estimation/` — EKF, particle filter.
-- `src/needlesim/learning/` — learned deflection models (torch).
-- `src/needlesim/utils/` — plotting, config, seeding. No domain logic.
-
 ## Non-negotiable conventions
 
 1. **Keep `step` pure.** Never make it stateful or give it a plotting side effect.
@@ -60,18 +47,14 @@ line in an interview or a grad school conversation.
 - Explain the "why," not just the fix. If my integrator is wrong, tell me which
   property is violated and let me find it.
 
-## Current status
+## Imports
 
-Phase 0 complete (scaffolding). Task 1: `step` implemented with RK4;
-`tests/test_needle_model.py` green.
-
-The duty-cycle test is the important one: for a fraction p of steps with
-b=+1, effective curvature kappa_eff = kappa*(2p - 1) must EMERGE from
-flipping the bevel direction, not be hardcoded. (p=0.5 -> straight line,
-p=0.75 -> kappa/2.)
+- @docs/roadmap.md
+- @docs/research_question.md
+- @README.md
+- @docs/architecture.md
 
 ## Reference
 
 - Webster et al., "Nonholonomic Modeling of Needle Steering," IJRR 2006.
 - Thrun, Burgard, Fox, *Probabilistic Robotics*, MIT Press 2005.
-- See `docs/research_question.md` for the framing this project is pointed at.
