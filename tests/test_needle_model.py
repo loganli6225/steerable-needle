@@ -59,9 +59,9 @@ def test_constant_control_traces_circle():
     ys = [s.y for s in trace]
     r_fit = _fit_circle_radius(xs, ys)
     r_true = 1.0 / params.kappa
-    assert abs(r_fit - r_true) / r_true < 0.02, (
-        f"fitted radius {r_fit:.2f} vs expected {r_true:.2f}"
-    )
+    assert (
+        abs(r_fit - r_true) / r_true < 0.02
+    ), f"fitted radius {r_fit:.2f} vs expected {r_true:.2f}"
 
 
 def test_flip_makes_symmetric_s_curve():
@@ -86,7 +86,9 @@ def test_flip_makes_symmetric_s_curve():
         reflected_err = math.hypot(
             after.x - (2 * mid.x - before.x), after.y - (2 * mid.y - before.y)
         )
-        assert reflected_err < 1e-6, f"j={j}: point-reflection error {reflected_err:.3e}"
+        assert (
+            reflected_err < 1e-6
+        ), f"j={j}: point-reflection error {reflected_err:.3e}"
 
 
 @pytest.mark.parametrize("p", [0.5, 0.625, 0.75, 0.875, 1.0])
@@ -108,14 +110,14 @@ def test_duty_cycle_scales_curvature(p):
     kappa_eff = dtheta / arc_len if arc_len > 0 else float("inf")
     predicted = params.kappa * (2 * p - 1)
     if predicted < 1e-9:
-        assert kappa_eff < 1e-3, (
-            f"expected ~straight line at p={p}, got kappa_eff={kappa_eff:.5f}"
-        )
+        assert (
+            kappa_eff < 1e-3
+        ), f"expected ~straight line at p={p}, got kappa_eff={kappa_eff:.5f}"
     else:
         rel_err = abs(kappa_eff - predicted) / predicted
-        assert rel_err < 0.02, (
-            f"p={p}: kappa_eff={kappa_eff:.5f} vs predicted {predicted:.5f}"
-        )
+        assert (
+            rel_err < 0.02
+        ), f"p={p}: kappa_eff={kappa_eff:.5f} vs predicted {predicted:.5f}"
 
 
 def test_rk4_matches_analytic_quarter_circle():
@@ -141,9 +143,9 @@ def test_rk4_matches_analytic_quarter_circle():
     err_100 = endpoint_error(100)
     err_200 = endpoint_error(200)
     assert err_200 < 1e-6, f"endpoint error {err_200:.3e} too large at n=200"
-    assert err_100 / err_200 > 8, (
-        f"convergence ratio {err_100 / err_200:.2f} looks like Euler (~2x), not RK4 (~16x)"
-    )
+    assert (
+        err_100 / err_200 > 8
+    ), f"convergence ratio {err_100 / err_200:.2f} looks like Euler (~2x), not RK4 (~16x)"
 
 
 if __name__ == "__main__":

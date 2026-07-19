@@ -89,8 +89,10 @@ class Control:
     b: int  # bevel direction, -1 or +1
 
 
-def _time_deriv(current_state: np.ndarray, control: Control, params: NeedleParams) -> np.ndarray:
-    """Time derivative of (x, y, theta). """
+def _time_deriv(
+    current_state: np.ndarray, control: Control, params: NeedleParams
+) -> np.ndarray:
+    """Time derivative of (x, y, theta)."""
     x, y, theta = current_state
     x_dot = control.v * np.cos(theta)
     y_dot = control.v * np.sin(theta)
@@ -123,10 +125,10 @@ def step(state: State, control: Control, dt: float, params: NeedleParams) -> Sta
 
     current_state = np.array([state.x, state.y, state.theta])
     k1 = _time_deriv(current_state, control, params)
-    k2 = _time_deriv(current_state + ((dt/2) * k1), control, params)
-    k3 = _time_deriv(current_state + ((dt/2) * k2), control, params)
+    k2 = _time_deriv(current_state + ((dt / 2) * k1), control, params)
+    k3 = _time_deriv(current_state + ((dt / 2) * k2), control, params)
     k4 = _time_deriv(current_state + ((dt) * k3), control, params)
-    return State(*(current_state + (dt/6)*(k1 + 2*k2 + 2*k3 + k4)))
+    return State(*(current_state + (dt / 6) * (k1 + 2 * k2 + 2 * k3 + k4)))
 
 
 def rollout(state: State, controls, dt: float, params: NeedleParams):

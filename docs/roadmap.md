@@ -100,6 +100,14 @@ of decisions made in earlier phases; do not quietly drop them.
   analytic solution (4th-order convergence confirmed). Acceptance tests
   rewritten to actually discriminate — see
   `tests/test_needle_model.py`.
-- **Task 2: next.** Open design question: occupancy grid versus polygon
-  obstacles. This determines what the collision checker can do and how the
-  planner queries it, so it is decided before code is written, not during.
+- **Task 2: complete.** Grid environment with a baked signed distance field:
+  O(1) collision (`is_free`) and clearance queries, and swept-arc checking
+  (`is_arc_free`) that rolls the Task 1 model forward and asserts sample
+  spacing ≤ half a cell. Verified against an analytic circle (clearance = d−r,
+  resolution-convergence) and eyeballed via an SDF heatmap with straddling
+  arcs. See `tests/test_grid_environment.py` and
+  `scripts/eyeball_grid_environment.py`.
+- **Task 3: next.** RRT → kinodynamic RRT → RRT*, in that order (see the
+  sequencing rationale above). First decision: the tree/node representation
+  and how the planner samples poses, connects them via the needle's
+  curvature-constrained `extend`, and calls `is_arc_free` for edge validity.
