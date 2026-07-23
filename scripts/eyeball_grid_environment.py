@@ -21,6 +21,7 @@ import matplotlib.pyplot as plt
 
 from needlesim.environments.grid_environment import GridEnvironment
 from needlesim.models.unicycle_needle import Control, NeedleParams, State, rollout
+from needlesim.utils.plotting import plot_sdf_background
 
 CX, CY, R = 70.0, 30.0, 15.0
 
@@ -36,32 +37,13 @@ hit_trace = rollout(start, [Control(v=5.0, b=-1)] * n_samples, dt, params)
 free_trace = rollout(start, [Control(v=5.0, b=+1)] * n_samples, dt, params)
 
 fig, ax = plt.subplots(figsize=(7, 6))
-im = ax.imshow(
-    env.sdf,
-    origin="lower",
-    extent=(0, env.width, 0, env.height),
-    cmap="RdBu",
-    vmin=-20,
-    vmax=20,
-)
-fig.colorbar(im, ax=ax, label="signed distance [mm]")
-ax.contour(
-    env.sdf,
-    levels=[0.0],
-    colors="k",
-    linewidths=1.5,
-    extent=(0, env.width, 0, env.height),
-    origin="lower",
-)
+ax, im = plot_sdf_background(env, ax=ax)
 
 ax.plot([s.x for s in hit_trace], [s.y for s in hit_trace], "r-", label="b=-1 (expect collision)")
 ax.plot([s.x for s in free_trace], [s.y for s in free_trace], "g-", label="b=+1 (expect clear)")
 ax.plot(start.x, start.y, "ko", label="start")
 ax.plot(CX, CY, "k+", markersize=12, label="(CX, CY)")
 
-ax.set_xlabel("x [mm]")
-ax.set_ylabel("y [mm]")
-ax.set_aspect("equal")
 ax.legend(loc="upper right", fontsize=8)
 ax.set_title("SDF sanity check: bands, rim sign flip, arc straddle")
 
