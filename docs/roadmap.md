@@ -107,7 +107,34 @@ of decisions made in earlier phases; do not quietly drop them.
   resolution-convergence) and eyeballed via an SDF heatmap with straddling
   arcs. See `tests/test_grid_environment.py` and
   `scripts/eyeball_grid_environment.py`.
-- **Task 3: next.** RRT → kinodynamic RRT → RRT*, in that order (see the
-  sequencing rationale above). First decision: the tree/node representation
-  and how the planner samples poses, connects them via the needle's
-  curvature-constrained `extend`, and calls `is_arc_free` for edge validity.
+- **Task 3: vanilla + kinodynamic RRT done; RRT* next.** Both planners
+  benchmarked on the same two scenarios (open single-circle, narrow doorway).
+  Kinodynamic needs ~3-4x vanilla's nodes/iterations (steering instead of
+  teleporting heading) but still finishes in well under 10% of its iteration
+  budget on both. Vanilla's path is a jagged sequence of straight cuts a real
+  needle cannot follow; kinodynamic's is a single smooth curvature-respecting
+  arc — the before/after this phase was meant to produce (see "Vanilla RRT's
+  failure is itself evidence" above). Figures: `docs/figures/rrt_vanilla_tree*.png`,
+  `docs/figures/rrt_kinodynamic_tree*.png`.
+
+  Two decisions baked into the current planner, worth recording because
+  they're easy to "fix" by accident later:
+  - **`nearest` uses position-only distance on purpose.** `_theta_weight` in
+    `RRT.__init__` is `0.0`. Heading was originally weighted at `(1/kappa)**2`,
+    but combined with a sampler that (at the time) always drew `theta=0`, it
+    made `nearest` optimize for heading match over position and the tree
+    collapsed into a thin fan instead of exploring — see the old failure
+    plots this replaced. The sampler now draws `theta` uniformly, which
+    removed the pathology, and position-only `nearest` is sufficient for both
+    benchmark scenarios (neither has a passage tight enough that heading
+    mismatch matters for connecting). Revisit non-zero heading weight if a
+    future scenario has a gap comparable to the turning radius `1/kappa` —
+    that's where picking the nearest-by-position node with the wrong heading
+    starts producing edges that can't actually connect.
+  - **The vanilla (straight-line) planner is retained, not deleted**, even
+    though the kinodynamic planner supersedes it for actual use. Per the
+    reasons above ("The progression is a result, not scaffolding"), vanilla
+    is a baseline the benchmark needs, and its jagged-path failure mode is
+    the comparison figure. The vanilla code path lives commented out in
+    `RRT.__init__`/`extend` in `src/needlesim/planning/rrt.py` and is
+    reproducible via `scripts/demo_rrt.py`.

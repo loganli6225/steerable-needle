@@ -120,8 +120,11 @@ class RRT:
         self.params = params
         self.config = config
         self.rng = np.random.default_rng(config.seed)
-        self._vanilla_params = NeedleParams(kappa=0.0)
-        self._vanilla_control = Control(v=config.edge_velocity, b=1)
+        self._theta_weight = 0.0 # (1/params.kappa)**2
+
+        ### VANILLA
+        # self._vanilla_params = NeedleParams(kappa=0.0)
+        # self._vanilla_control = Control(v=config.edge_velocity, b=1)
 
         # Recommended: validate the spacing invariant up front so the
         # is_arc_free assert can never fire mid-run. IMPLEMENT (small).
@@ -146,7 +149,7 @@ class RRT:
         x_min, y_min, x_max, y_max = self.env.bounds
         x = self.rng.uniform(x_min, x_max)
         y = self.rng.uniform(y_min, y_max)
-        theta = 0.0
+        theta = self.rng.uniform(0, 2*np.pi)
         return State(x, y, theta)
 
     def nearest(self, nodes: list[Node], target: State) -> int:
@@ -163,7 +166,6 @@ class RRT:
             if closest_distance > node_distance:
                 closest_distance = node_distance
                 closest_node_idx = idx
-
         return closest_node_idx
 
 
@@ -183,7 +185,13 @@ class RRT:
         # Will need a weighted metric: sqrt(dx^2 + dy^2 + w * angle_diff^2), with
         # w tuned relative to the turning radius 1/kappa. Angle diff must wrap
         # to [-pi, pi].
-        return np.sqrt((a.x - b.x)**2 + (a.y - b.y)**2)
+        ### FOR VANILLA
+        # return np.sqrt((a.x - b.x)**2 + (a.y - b.y)**2)
+
+        # Heuristic metric: weighted Euclidean, not true Dubins cost-to-connect.
+        # Good enough for kinodynamic RRT; RRT* will need the real Dubins distance.
+        d_theta = (a.theta - b.theta + np.pi) % (2 * np.pi) - np.pi
+        return np.sqrt((a.x - b.x)**2 + (a.y - b.y)**2 + self._theta_weight*(d_theta)**2)
 
     def extend(self, from_state: State, toward: State) -> tuple[State, Control] | None:
         """Grow from `from_state` toward `toward` by one edge.
@@ -213,20 +221,41 @@ class RRT:
         Either way: the edge must be collision-checked with is_arc_free BEFORE
         you accept it. Returning None means "couldn't grow this way."
         """
+        ### FOR VANILLA
+        # if self.distance(from_state, toward) < 1e-9:
+        #     return None
+        # theta = np.arctan2(toward.y - from_state.y, toward.x - from_state.x)
+        # from_state_copy = State(from_state.x, from_state.y, theta)
+        # if self.env.is_arc_free(from_state_copy, self._vanilla_control, self.config.step_dt, self.config.n_steps_per_extend, self._vanilla_params, self.config.margin):
+        #     # rollout of n separate steps. With kappa=0 a single big step would be
+        #     # exact (constant derivative), but stepping n times is what the
+        #     # curvature-constrained version needs, so keep this form.
+        #     controls = [self._vanilla_control] * self.config.n_steps_per_extend
+        #     trace = rollout(from_state_copy, controls, self.config.step_dt, self._vanilla_params)
+        #     new_state = trace[-1]
+        #     return (new_state, self._vanilla_control)
+        # return None
+
+        ### KINODYNAMIC
         if self.distance(from_state, toward) < 1e-9:
             return None
-        theta = np.arctan2(toward.y - from_state.y, toward.x - from_state.x)
-        from_state_copy = State(from_state.x, from_state.y, theta)
-        if self.env.is_arc_free(from_state_copy, self._vanilla_control, self.config.step_dt, self.config.n_steps_per_extend, self._vanilla_params, self.config.margin):
-            # rollout of n separate steps. With kappa=0 a single big step would be
-            # exact (constant derivative), but stepping n times is what the
-            # curvature-constrained version needs, so keep this form.
-            controls = [self._vanilla_control] * self.config.n_steps_per_extend
-            trace = rollout(from_state_copy, controls, self.config.step_dt, self._vanilla_params)
-            new_state = trace[-1]
-            return (new_state, self._vanilla_control)
-        return None
 
+        best_scenario = None
+        for b in [1, -1]:
+            control = Control(v=self.config.edge_velocity, b=b)
+            if not self.env.is_arc_free(from_state, control, self.config.step_dt, self.config.n_steps_per_extend, self.params, self.config.margin):
+                continue
+            controls = [control] * self.config.n_steps_per_extend
+            trace = rollout(from_state, controls, self.config.step_dt, self.params)
+            end_state = trace[-1]
+            d = self.distance(end_state, toward)
+            if best_scenario is None or d < best_scenario[0]:
+                best_scenario = (d, end_state, control)
+
+        if best_scenario is None:
+            return None
+        _, new_state, control = best_scenario
+        return new_state, control
 
     # --- goal + assembly --------------------------------------------------
 

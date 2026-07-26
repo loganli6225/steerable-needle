@@ -70,7 +70,7 @@ SCENARIOS = [
         rrt_config=RRTConfig(
             max_iterations=5000, goal_tolerance=3.0, step_dt=0.05, edge_velocity=5.0, seed=1
         ),
-        output_path=Path("experiments/results/rrt_vanilla_tree.png"),
+        output_path=Path("experiments/results/rrt_kinodynamic_tree.png"),
     ),
     Scenario(
         name="narrow doorway (bug trap)",
@@ -87,7 +87,7 @@ SCENARIOS = [
         rrt_config=RRTConfig(
             max_iterations=20000, goal_tolerance=3.0, step_dt=0.05, edge_velocity=5.0, seed=1
         ),
-        output_path=Path("experiments/results/rrt_vanilla_tree_hard.png"),
+        output_path=Path("experiments/results/rrt_kinodynamic_tree_hard.png"),
     ),
 ]
 
@@ -143,7 +143,7 @@ def render(env: GridEnvironment, result, scenario: Scenario) -> None:
 
     status = "success" if result.success else "FAILED (no path found -- tree shown for diagnosis)"
     ax.set_title(
-        f"Vanilla RRT -- {scenario.name}\n"
+        f"Kinodynamic RRT -- {scenario.name}\n"
         f"success={result.success}, nodes={len(result.nodes)}, "
         f"iterations={result.n_iterations} ({status})"
     )
