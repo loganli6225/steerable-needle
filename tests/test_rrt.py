@@ -9,17 +9,16 @@ Run:  pytest tests/test_rrt.py -v
 
 import math
 
-import numpy as np
 import pytest
 
-from needlesim.models.unicycle_needle import Control, NeedleParams, State
+from needlesim.models.unicycle_needle import NeedleParams, State
 from needlesim.environments.grid_environment import GridEnvironment
 from needlesim.planning.rrt import RRT, RRTConfig
 
 
 def make_env():
     env = GridEnvironment(width=100.0, height=100.0, resolution=0.5)
-    env.add_circle(50.0, 50.0, 15.0)   # one obstacle in the middle
+    env.add_circle(50.0, 50.0, 15.0)  # one obstacle in the middle
     env.bake()
     return env
 
@@ -28,17 +27,23 @@ def make_planner(seed=0):
     env = make_env()
     params = NeedleParams(kappa=1.0 / 20.0)
     # step_dt chosen so edge_velocity*step_dt <= 0.5*resolution (5*0.05=0.25=0.5*0.5)
-    cfg = RRTConfig(max_iterations=5000, goal_tolerance=3.0, step_dt=0.05,
-                    edge_velocity=5.0, seed=seed)
+    cfg = RRTConfig(
+        max_iterations=5000,
+        goal_tolerance=3.0,
+        step_dt=0.05,
+        edge_velocity=5.0,
+        seed=seed,
+    )
     return RRT(env, params, cfg)
 
 
 # ---- basic reachability: start and goal in free space, no obstacle between --
 
+
 def test_finds_path_in_open_corridor():
     planner = make_planner(seed=1)
     start = State(20.0, 20.0, math.pi / 2)
-    goal = State(20.0, 80.0, math.pi / 2)   # straight up the left side, clear of circle
+    goal = State(20.0, 80.0, math.pi / 2)  # straight up the left side, clear of circle
     result = planner.plan(start, goal)
     assert result.success, "should find a path up the obstacle-free left corridor"
     assert result.path is not None
@@ -48,6 +53,7 @@ def test_finds_path_in_open_corridor():
 
 
 # ---- the returned path must actually be collision-free ----------------------
+
 
 def test_returned_path_is_collision_free():
     planner = make_planner(seed=2)
@@ -61,6 +67,7 @@ def test_returned_path_is_collision_free():
 
 
 # ---- the tree is well-formed ------------------------------------------------
+
 
 def test_tree_is_connected():
     planner = make_planner(seed=3)
@@ -76,6 +83,7 @@ def test_tree_is_connected():
 
 # ---- reproducibility: same seed -> same result ------------------------------
 
+
 def test_same_seed_same_result():
     a = make_planner(seed=7)
     b = make_planner(seed=7)
@@ -88,6 +96,7 @@ def test_same_seed_same_result():
 
 
 # ---- goal biasing sanity: goal is sometimes sampled -------------------------
+
 
 def test_goal_biasing_returns_goal_sometimes():
     planner = make_planner(seed=0)

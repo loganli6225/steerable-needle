@@ -141,3 +141,10 @@ def rollout(state: State, controls, dt: float, params: NeedleParams):
     for control in controls:
         trace.append(step(trace[-1], control, dt, params))
     return trace
+
+
+def rollout_variable(state: State, control_dt_pairs, params: NeedleParams):
+    trace = [state]
+    for control, dt in control_dt_pairs:
+        trace.append(step(trace[-1], control, dt, params))
+    return trace

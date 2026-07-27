@@ -16,6 +16,7 @@ Read this before proposing that a phase be skipped, merged, or reordered.
 | **Task 1** | 2D bevel-tip kinematics + visualizer | the model everything else calls |
 | **Task 2** | obstacle maps + collision checking | the environment |
 | **Task 3** | RRT → kinodynamic RRT → RRT* | planning |
+| **Task 3.5** | Dubins CCC exact steering | the connect-exactly primitive RRT* rewiring needs |
 | **Phase 3** | EKF + particle filter, closed-loop replanning | estimation under uncertainty |
 | **Phase 4** | learned deflection model / learned sampling | learning, and state-dependent kappa |
 
@@ -138,3 +139,28 @@ of decisions made in earlier phases; do not quietly drop them.
     the comparison figure. The vanilla code path lives commented out in
     `RRT.__init__`/`extend` in `src/needlesim/planning/rrt.py` and is
     reproducible via `scripts/demo_rrt.py`.
+- **Task 3.5: complete.** CCC (arc-arc-arc) Dubins steering for the bevel-tip
+  needle — `dubins_ccc` in `src/needlesim/planning/dubins.py`. CCC-only, not
+  the classical CSC/CCC pair: a bevel-tip needle always curves at ±kappa and
+  cannot go straight, so the S segment is dropped and only RLR/LRL remain.
+  Reachability is exact, not heuristic: a CCC path exists only when the two
+  outer turning centres are < 4R apart, and that boundary is treated as
+  central, not an edge case — beyond it `dubins_ccc` returns `None` cleanly
+  (verified it doesn't raise, including fuzzed near the 4R boundary), which
+  is what lets RRT* skip an edge instead of crashing. Correctness rests on
+  the three analytic test classes in `tests/test_dubins.py` since there's no
+  external reference solver; the strongest of the three round-trips the
+  returned controls through the Task 1 `step` and checks the needle actually
+  lands on the goal.
+
+  Discretization is now exact, not deferred: each arc's final control step
+  carries a trimmed `dt` (`DubinsPath.controls` is `list[tuple[Control,
+  float]]`, executed via `rollout_variable`) so the executed path lands on
+  the goal to floating-point precision instead of accumulating the
+  `ceil()`-rounding overshoot of naively discretizing every step at a fixed
+  `dt`. That overshoot was real, not just a theoretical worst case — fuzzing
+  20k random reachable start/goal pairs under the naive scheme put ~10% of
+  them over test 3's tolerance (worst case 1.29mm against a 0.5mm bound); the
+  trimmed-final-step fix brings the same sweep's worst case down to
+  floating-point noise (~1e-9mm). Not yet wired into RRT* rewiring — that
+  integration is what "RRT* next" above still refers to.

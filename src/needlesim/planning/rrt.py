@@ -35,12 +35,11 @@ What this planner needs from earlier tasks
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 
 import numpy as np
 
-from needlesim.models.unicycle_needle import Control, NeedleParams, State, rollout, step
-
+from needlesim.models.unicycle_needle import Control, NeedleParams, State, rollout
 
 # ---------------------------------------------------------------------------
 # Plain containers -- scaffolding, safe to delegate. These just hold data.
@@ -57,8 +56,8 @@ class Node:
     """
 
     state: State
-    parent: int | None = None          # index into the tree's node list
-    control: Control | None = None     # control that produced this node
+    parent: int | None = None  # index into the tree's node list
+    control: Control | None = None  # control that produced this node
 
 
 @dataclass
@@ -69,9 +68,9 @@ class RRTResult:
     and later benchmarked (nodes expanded, coverage, etc.).
     """
 
-    nodes: list[Node]                  # the whole tree
-    path: list[State] | None           # goal->start reversed to start->goal, or None
-    controls: list[Control] | None     # controls along the path, or None
+    nodes: list[Node]  # the whole tree
+    path: list[State] | None  # goal->start reversed to start->goal, or None
+    controls: list[Control] | None  # controls along the path, or None
     success: bool
     n_iterations: int
 
@@ -86,11 +85,11 @@ class RRTConfig:
     """Tunables for a run. Config-driven + seeded (see CLAUDE.md conventions)."""
 
     max_iterations: int = 5000
-    goal_tolerance: float = 3.0        # [mm] how close to goal counts as reached
-    goal_sample_rate: float = 0.05     # fraction of samples drawn AT the goal (bias)
-    step_dt: float = 0.05              # per-step dt handed to is_arc_free/step
-    n_steps_per_extend: int = 20       # steps taken per extend (arc length = v*dt*n)
-    edge_velocity: float = 5.0         # v used when extending [mm/s]
+    goal_tolerance: float = 3.0  # [mm] how close to goal counts as reached
+    goal_sample_rate: float = 0.05  # fraction of samples drawn AT the goal (bias)
+    step_dt: float = 0.05  # per-step dt handed to is_arc_free/step
+    n_steps_per_extend: int = 20  # steps taken per extend (arc length = v*dt*n)
+    edge_velocity: float = 5.0  # v used when extending [mm/s]
     seed: int = 0
     # [mm] clearance required on top of the point-robot arc, so the vanilla
     # and curvature-constrained planners are compared under the same
@@ -120,7 +119,7 @@ class RRT:
         self.params = params
         self.config = config
         self.rng = np.random.default_rng(config.seed)
-        self._theta_weight = 0.0 # (1/params.kappa)**2
+        self._theta_weight = 0.0  # (1/params.kappa)**2
 
         ### VANILLA
         # self._vanilla_params = NeedleParams(kappa=0.0)
@@ -149,7 +148,7 @@ class RRT:
         x_min, y_min, x_max, y_max = self.env.bounds
         x = self.rng.uniform(x_min, x_max)
         y = self.rng.uniform(y_min, y_max)
-        theta = self.rng.uniform(0, 2*np.pi)
+        theta = self.rng.uniform(0, 2 * np.pi)
         return State(x, y, theta)
 
     def nearest(self, nodes: list[Node], target: State) -> int:
@@ -167,7 +166,6 @@ class RRT:
                 closest_distance = node_distance
                 closest_node_idx = idx
         return closest_node_idx
-
 
     def distance(self, a: State, b: State) -> float:
         """Distance between two poses.
@@ -191,7 +189,9 @@ class RRT:
         # Heuristic metric: weighted Euclidean, not true Dubins cost-to-connect.
         # Good enough for kinodynamic RRT; RRT* will need the real Dubins distance.
         d_theta = (a.theta - b.theta + np.pi) % (2 * np.pi) - np.pi
-        return np.sqrt((a.x - b.x)**2 + (a.y - b.y)**2 + self._theta_weight*(d_theta)**2)
+        return np.sqrt(
+            (a.x - b.x) ** 2 + (a.y - b.y) ** 2 + self._theta_weight * (d_theta) ** 2
+        )
 
     def extend(self, from_state: State, toward: State) -> tuple[State, Control] | None:
         """Grow from `from_state` toward `toward` by one edge.
@@ -243,7 +243,14 @@ class RRT:
         best_scenario = None
         for b in [1, -1]:
             control = Control(v=self.config.edge_velocity, b=b)
-            if not self.env.is_arc_free(from_state, control, self.config.step_dt, self.config.n_steps_per_extend, self.params, self.config.margin):
+            if not self.env.is_arc_free(
+                from_state,
+                control,
+                self.config.step_dt,
+                self.config.n_steps_per_extend,
+                self.params,
+                self.config.margin,
+            ):
                 continue
             controls = [control] * self.config.n_steps_per_extend
             trace = rollout(from_state, controls, self.config.step_dt, self.params)
@@ -267,7 +274,9 @@ class RRT:
         """
         return self.distance(state, self.goal) < self.config.goal_tolerance
 
-    def reconstruct(self, nodes: list[Node], goal_idx: int) -> tuple[list[State], list[Control]]:
+    def reconstruct(
+        self, nodes: list[Node], goal_idx: int
+    ) -> tuple[list[State], list[Control]]:
         """Walk parent pointers from goal_idx back to the root.
 
         IMPLEMENT ME (small, pure bookkeeping -- delegable). Collect states and
@@ -312,7 +321,7 @@ class RRT:
         """
         self.goal = goal
         tree = [Node(start, parent=None, control=None)]
-        for num_iterations in range(1, self.config.max_iterations+1):
+        for num_iterations in range(1, self.config.max_iterations + 1):
             target = self.sample()
             i = self.nearest(tree, target)
             result = self.extend(tree[i].state, target)
@@ -323,5 +332,17 @@ class RRT:
             if self.reached_goal(new_state):
                 goal_idx = len(tree) - 1
                 success_path, success_controls = self.reconstruct(tree, goal_idx)
-                return RRTResult(nodes=tree, path=success_path, controls=success_controls, success=True, n_iterations=num_iterations)
-        return RRTResult(nodes=tree, path=None, controls=None, success=False, n_iterations=self.config.max_iterations)
+                return RRTResult(
+                    nodes=tree,
+                    path=success_path,
+                    controls=success_controls,
+                    success=True,
+                    n_iterations=num_iterations,
+                )
+        return RRTResult(
+            nodes=tree,
+            path=None,
+            controls=None,
+            success=False,
+            n_iterations=self.config.max_iterations,
+        )
