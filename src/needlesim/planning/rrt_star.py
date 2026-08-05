@@ -276,12 +276,14 @@ class RRTStar:
         control sequence; root has None."""
         states = []
         controls_lists = []
+        total_length = 0.0
         current_node_idx = goal_idx
         while current_node_idx is not None:
             state = nodes[current_node_idx].state
             states.append(state)
             if nodes[current_node_idx].edge_from_parent is not None:
                 controls_lists.append(nodes[current_node_idx].edge_from_parent.controls)
+                total_length += nodes[current_node_idx].edge_from_parent.length
             current_node_idx = nodes[current_node_idx].parent
         states.reverse()
         controls_lists.reverse()
@@ -289,7 +291,7 @@ class RRTStar:
         for one_list_controls in controls_lists:
             for pair in one_list_controls:
                 controls_flat.append(pair)
-        return states, controls_flat
+        return states, controls_flat, total_length
 
     def nearest(self, nodes: list[Node], target_x: float, target_y: float) -> int:
         """Return the INDEX of the tree node closest to `target`.
@@ -367,12 +369,12 @@ class RRTStar:
                 n_iterations=self.config.max_iterations,
                 best_cost=np.inf,
             )
-        path, pairs = self.reconstruct(tree, best_goal_idx)
+        path, pairs, true_cost  = self.reconstruct(tree, best_goal_idx)
         return RRTStarResult(
             nodes=tree,
             path=path,
             control_dt_pairs=pairs,
             success=True,
             n_iterations=self.config.max_iterations,
-            best_cost=best_cost,
+            best_cost=true_cost,
         )

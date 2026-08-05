@@ -112,7 +112,6 @@ def test_more_iterations_no_worse():
 
 # ---- tree well-formed ------------------------------------------------------
 
-
 def test_tree_acyclic():
     result = make_planner(seed=7).plan(START, GOAL)
     nodes = result.nodes
