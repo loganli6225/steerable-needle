@@ -1,10 +1,13 @@
 """
 RRT* planner for the steerable needle, built on CCC Dubins steering.
 
-THIS IS YOUR TASK 4 FILE. Interface + skeleton laid out; the load-bearing
-methods (choose_parent, rewire, the main loop) are yours. Per the working
-agreement, cost/steering/rewiring logic is yours; plain containers and plotting
-are delegable.
+Hierarchy note (see planning/base.py for the full rationale): RRTStar extends
+PlannerBase directly, as a SIBLING of the RRT class -- not a subclass of it.
+Its loop is structurally different from RRT's (choose-parent + rewire +
+full-budget best-tracking instead of return-on-first-contact), so only the
+base primitives (sample / nearest / near_indices / distance / reached_goal)
+are shared. That sharing is what makes the three-planner benchmark
+comparison valid.
 
 RRT* = RRT + two additions that plain RRT lacks:
   1. CHOOSE-BEST-PARENT: a new node attaches not to the nearest node, but to
@@ -38,6 +41,7 @@ from dataclasses import dataclass
 import numpy as np
 
 from needlesim.models.unicycle_needle import NeedleParams, State, rollout_variable
+from needlesim.planning.base import BasePlannerConfig, PlannerBase
 from needlesim.planning.dubins import DubinsPath, dubins_ccc
 
 # ---------------------------------------------------------------------------
@@ -50,9 +54,7 @@ def edge_cost(
 ) -> float:
     """Cost of traversing a Dubins edge.
 
-    IMPLEMENT ME.
-
-    PHASE A (do first): return path.length. Pure length-only RRT*.
+    PHASE A (current): return path.length. Pure length-only RRT*.
 
     PHASE B (swap in later): add a clearance penalty, e.g.
         length + clearance_weight * (penalty integrated along the edge),
@@ -70,8 +72,6 @@ def edge_cost(
 
 def rewire_radius(n_nodes: int, gamma: float, dim: int, max_radius: float) -> float:
     """Shrinking RRT* neighbourhood radius.
-
-    IMPLEMENT ME (small).
 
         r(n) = min(max_radius, gamma * (log(n) / n) ** (1/dim))
 
@@ -93,7 +93,11 @@ def rewire_radius(n_nodes: int, gamma: float, dim: int, max_radius: float) -> fl
 @dataclass
 class Node:
     """Tree vertex. cost_from_start is maintained incrementally as the tree
-    grows and rewires -- keep it in sync whenever parent changes."""
+    grows and rewires -- keep it in sync whenever parent changes.
+
+    Intentionally DIFFERENT from the RRT Node (carries cost bookkeeping and a
+    Dubins edge instead of a single Control); do not unify them.
+    """
 
     state: State
     parent: int | None = None
@@ -114,12 +118,9 @@ class RRTStarResult:
 
 
 @dataclass
-class RRTStarConfig:
-    max_iterations: int = 5000
-    goal_tolerance: float = 3.0
-    goal_sample_rate: float = 0.05
-    step_dt: float = 0.05
-    edge_velocity: float = 5.0
+class RRTStarConfig(BasePlannerConfig):
+    """RRT*-specific tunables. Shared fields come from BasePlannerConfig."""
+
     # rewire radius
     gamma: float = 40.0  # TUNE. Scales the shrinking radius.
     dim: int = 3  # config-space dim for Dubins (x,y,theta)
@@ -127,34 +128,23 @@ class RRTStarConfig:
     # cost
     clearance_weight: float = 0.0  # 0.0 = length-only (Phase A). >0 = Phase B.
     margin: float = 0.0  # is_arc_free margin [mm]
-    seed: int = 0
 
 
 # ---------------------------------------------------------------------------
-# The planner. Methods marked IMPLEMENT ME are yours.
+# The planner.
 # ---------------------------------------------------------------------------
 
 
-class RRTStar:
-    def __init__(self, env, params: NeedleParams, config: RRTStarConfig) -> None:
-        self.env = env
-        self.params = params  # MODEL params, never ground truth
-        self.config = config
-        self.rng = np.random.default_rng(config.seed)
+class RRTStar(PlannerBase):
+    # __init__ is inherited from PlannerBase, which now does everything the
+    # old RRTStar.__init__ did, plus the spacing-invariant assert.
 
-    # --- steering: the Dubins bridge (delegable wrapper, but check it) -----
+    # --- steering: the Dubins bridge ---------------------------------------
 
     def steer(self, from_state: State, to_state: State) -> DubinsPath | None:
         """Exact Dubins connection from -> to, or None if unconnectable OR the
-        edge collides. IMPLEMENT ME (small wrapper):
-            1. path = dubins_ccc(from_state, to_state, self.params,
-                                 config.edge_velocity, config.step_dt)
-            2. if path is None: return None
-            3. collision-check the edge: roll it out and require is_free at
-               every pose (or use a variable-dt arc check). Return None if it
-               hits. Otherwise return path.
-        This is the ONE connection primitive choose_parent and rewire both use.
-        """
+        edge collides. This is the ONE connection primitive choose_parent and
+        rewire both use."""
         path = dubins_ccc(
             from_state,
             to_state,
@@ -171,29 +161,6 @@ class RRTStar:
                 return None
         return path
 
-    # --- sampling / nearest (same as RRT; can reuse) -----------------------
-
-    def sample(self) -> tuple[float, float]:
-        """Random pose in bounds, goal-biased. IMPLEMENT (same as your RRT)."""
-        if self.rng.random() < self.config.goal_sample_rate:
-            return self.goal.x, self.goal.y
-        x_min, y_min, x_max, y_max = self.env.bounds
-        x = self.rng.uniform(x_min, x_max)
-        y = self.rng.uniform(y_min, y_max)
-        return x, y
-
-    def near_indices(
-        self, nodes: list[Node], target: State, radius: float
-    ) -> list[int]:
-        """Indices of all nodes within `radius` of target (position distance is
-        fine here). IMPLEMENT ME. Unlike RRT's single nearest(), RRT* needs the
-        whole neighbourhood for choose-parent and rewire."""
-        indices_within_radius = []
-        for idx, node in enumerate(nodes):
-            if self.distance(target, node.state) <= radius:
-                indices_within_radius.append(idx)
-        return indices_within_radius
-
     # --- the two RRT* steps: the heart -------------------------------------
 
     def choose_parent(
@@ -202,12 +169,8 @@ class RRTStar:
         """Among neighbourhood nodes that can steer to new_state collision-free,
         pick the one giving the lowest cost_from_start for new_state.
 
-        IMPLEMENT ME. Returns (best_parent_idx, best_edge, best_cost) or None if
-        no neighbour can connect. For each candidate i:
-            edge = self.steer(nodes[i].state, new_state)
-            if edge is None: skip
-            c = nodes[i].cost_from_start + edge_cost(edge, ...)
-            keep the minimum.
+        Returns (best_parent_idx, best_edge, best_cost) or None if no
+        neighbour can connect.
         """
         best_parent_idx = None
         best_edge = None
@@ -227,22 +190,8 @@ class RRTStar:
         return (best_parent_idx, best_edge, best_cost)
 
     def rewire(self, nodes: list[Node], new_idx: int, neighbourhood: list[int]) -> None:
-        """For each neighbour, if reaching it THROUGH new node is cheaper,
-        re-parent it to new node and update its cost.
-
-        IMPLEMENT ME. For each i in neighbourhood (i != new node's parent):
-            edge = self.steer(nodes[new_idx].state, nodes[i].state)
-            if edge is None: skip
-            new_cost = nodes[new_idx].cost_from_start + edge_cost(edge, ...)
-            if new_cost < nodes[i].cost_from_start:
-                nodes[i].parent = new_idx
-                nodes[i].cost_from_start = new_cost
-                nodes[i].edge_from_parent = edge
-                # NOTE: descendants of i now have stale cost_from_start. For a
-                # first correct version, propagate the delta to the subtree, OR
-                # accept slightly stale costs (common simplification). Document
-                # whichever you choose -- it affects optimality, not validity.
-        """
+        """For each neighbour, if reaching it THROUGH the new node is cheaper,
+        re-parent it to the new node and update its cost."""
         for idx in neighbourhood:
             if idx == new_idx or idx == nodes[new_idx].parent:
                 continue
@@ -261,19 +210,12 @@ class RRTStar:
         # valid, only optimality is mildly affected. Not propagating the delta
         # through the subtree (Node has no child pointers; would need a scan).
 
-    # --- goal + assembly + main loop ---------------------------------------
-
-    def distance(self, a: State, b: State) -> float:
-        return math.hypot(a.x - b.x, a.y - b.y)
-
-    def reached_goal(self, state: State) -> bool:
-        """IMPLEMENT (small). Position within config.goal_tolerance of goal."""
-        return self.distance(state, self.goal) < self.config.goal_tolerance
+    # --- assembly + main loop ----------------------------------------------
 
     def reconstruct(self, nodes: list[Node], goal_idx: int):
-        """Walk parents to root; return (states, concatenated (control,dt) pairs).
-        IMPLEMENT (bookkeeping, delegable). Use edge_from_parent for the
-        control sequence; root has None."""
+        """Walk parents to root; return (states, concatenated (control, dt)
+        pairs, total path length). Uses edge_from_parent for the control
+        sequence; the root has None."""
         states = []
         controls_lists = []
         total_length = 0.0
@@ -293,58 +235,26 @@ class RRTStar:
                 controls_flat.append(pair)
         return states, controls_flat, total_length
 
-    def nearest(self, nodes: list[Node], target_x: float, target_y: float) -> int:
-        """Return the INDEX of the tree node closest to `target`.
-
-        IMPLEMENT ME. "Closest" is defined by self.distance. Linear scan over
-        nodes is fine to start (this is O(n) per iteration; a KD-tree is a
-        later optimisation, do not bother now).
-        """
-        closest_node_idx = -1
-        closest_distance = np.inf
-        for idx, node in enumerate(nodes):
-            node_distance = math.hypot(node.state.x - target_x, node.state.y - target_y)
-            if closest_distance > node_distance:
-                closest_distance = node_distance
-                closest_node_idx = idx
-        return closest_node_idx
-
     def plan(self, start: State, goal: State) -> RRTStarResult:
-        """RRT* main loop. IMPLEMENT ME.
+        """RRT* main loop.
 
-        Unlike RRT, do NOT return on first goal contact -- RRT* keeps improving.
-        Track the best goal node seen and its cost; return the best at the end.
-
-        Skeleton:
-            self.goal = goal
-            nodes = [Node(start, parent=None, cost_from_start=0.0)]
-            best_goal_idx, best_cost = None, inf
-            for it in 1..max_iterations:
-                target = sample()
-                # nearest single node to steer TOWARD (like RRT), then the
-                # steered new_state; OR sample a state and use it directly.
-                r = rewire_radius(len(nodes), gamma, dim, max_radius)
-                neigh = near_indices(nodes, new_state, r)
-                cp = choose_parent(nodes, new_state, neigh)
-                if cp is None: continue
-                parent_idx, edge, cost = cp
-                append Node(new_state, parent_idx, cost, edge); new_idx = last
-                rewire(nodes, new_idx, neigh)
-                if reached_goal(new_state) and cost < best_cost:
-                    best_goal_idx, best_cost = new_idx, cost
-            build result from best_goal_idx (or failure with the tree).
-
-        Return RRTStarResult either way (tree always returned for plotting).
+        Unlike RRT, does NOT return on first goal contact -- RRT* keeps
+        improving. Tracks the best goal node seen and its cost; returns the
+        best at the end. The tree is always returned (for plotting), success
+        or not.
         """
         self.goal = goal
         tree = [Node(start, parent=None, cost_from_start=0.0)]
         best_goal_idx, best_cost = None, np.inf
         for i in range(self.config.max_iterations):
-            target_x, target_y = self.sample()
-            idx_near_target = self.nearest(tree, target_x, target_y)
+            sampled = self.sample()  # State; theta is discarded below
+            idx_near_target = self.nearest(tree, State(sampled.x, sampled.y, 0.0))
             near_state = tree[idx_near_target].state
-            theta = math.atan2(target_y - near_state.y, target_x - near_state.x)
-            target = State(target_x, target_y, theta)
+            # Target heading is derived from nearest-node-toward-sample because
+            # raw sampled headings are mostly CCC-unreachable (measured: ~87%
+            # sample rejection before this derivation was introduced).
+            theta = math.atan2(sampled.y - near_state.y, sampled.x - near_state.x)
+            target = State(sampled.x, sampled.y, theta)
 
             r = rewire_radius(
                 len(tree), self.config.gamma, self.config.dim, self.config.max_radius
@@ -369,7 +279,7 @@ class RRTStar:
                 n_iterations=self.config.max_iterations,
                 best_cost=np.inf,
             )
-        path, pairs, true_cost  = self.reconstruct(tree, best_goal_idx)
+        path, pairs, true_cost = self.reconstruct(tree, best_goal_idx)
         return RRTStarResult(
             nodes=tree,
             path=path,
