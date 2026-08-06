@@ -34,7 +34,7 @@ from matplotlib.patches import Circle
 
 from needlesim.environments.grid_environment import GridEnvironment
 from needlesim.models.unicycle_needle import NeedleParams, State
-from needlesim.planning.rrt import RRT, RRTConfig
+from needlesim.planning.rrt import KinodynamicRRT, RRTConfig
 from needlesim.utils.plotting import plot_sdf_background
 
 
@@ -158,7 +158,7 @@ def main() -> None:
     for scenario in SCENARIOS:
         env = build_environment(scenario)
         params = NeedleParams(kappa=scenario.kappa)
-        planner = RRT(env, params, scenario.rrt_config)
+        planner = KinodynamicRRT(env, params, scenario.rrt_config)
         result = planner.plan(scenario.start, scenario.goal)
         print(
             f"{scenario.name}: success={result.success}, "

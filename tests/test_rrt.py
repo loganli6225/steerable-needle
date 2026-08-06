@@ -13,7 +13,7 @@ import pytest
 
 from needlesim.models.unicycle_needle import NeedleParams, State
 from needlesim.environments.grid_environment import GridEnvironment
-from needlesim.planning.rrt import RRT, RRTConfig
+from needlesim.planning.rrt import KinodynamicRRT, RRTConfig
 
 
 def make_env():
@@ -34,7 +34,7 @@ def make_planner(seed=0):
         edge_velocity=5.0,
         seed=seed,
     )
-    return RRT(env, params, cfg)
+    return KinodynamicRRT(env, params, cfg)
 
 
 # ---- basic reachability: start and goal in free space, no obstacle between --
