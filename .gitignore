@@ -34,3 +34,4 @@ data/
 .DS_Store
 .idea/
 .vscode/
+*_prompt_*.md

@@ -32,6 +32,7 @@ from needlesim.planning.rrt_star import Node, RRTStar, RRTStarConfig
 # dead simple and obviously correct; they are the oracle.
 # ---------------------------------------------------------------------------
 
+
 def brute_nearest(nodes, px, py):
     """Index of the single closest node by Euclidean position distance."""
     best_i, best_d = -1, float("inf")
@@ -45,7 +46,8 @@ def brute_nearest(nodes, px, py):
 def brute_near(nodes, px, py, r):
     """SET of indices of all nodes within radius r (inclusive)."""
     return {
-        i for i, node in enumerate(nodes)
+        i
+        for i, node in enumerate(nodes)
         if math.hypot(node.state.x - px, node.state.y - py) <= r
     }
 
@@ -53,6 +55,7 @@ def brute_near(nodes, px, py, r):
 # ---------------------------------------------------------------------------
 # Helper: build a planner and cram its tree with N random nodes.
 # ---------------------------------------------------------------------------
+
 
 def build_planner_with_random_nodes(n_nodes, seed=0):
     env = GridEnvironment(100.0, 100.0, 0.5)
@@ -66,13 +69,22 @@ def build_planner_with_random_nodes(n_nodes, seed=0):
     rng = random.Random(seed)
     nodes = []
     for _ in range(n_nodes):
-        nodes.append(Node(State(rng.uniform(0, 100), rng.uniform(0, 100), rng.uniform(0, 2*math.pi))))
+        nodes.append(
+            Node(
+                State(
+                    rng.uniform(0, 100),
+                    rng.uniform(0, 100),
+                    rng.uniform(0, 2 * math.pi),
+                )
+            )
+        )
     return planner, nodes
 
 
 # ---------------------------------------------------------------------------
 # 1. nearest == brute-force nearest, over many random queries
 # ---------------------------------------------------------------------------
+
 
 def test_nearest_matches_bruteforce():
     planner, nodes = build_planner_with_random_nodes(300, seed=1)
@@ -95,6 +107,7 @@ def test_nearest_matches_bruteforce():
 # 2. near_indices == brute-force within-radius SET, over many random queries
 # ---------------------------------------------------------------------------
 
+
 def test_near_indices_matches_bruteforce():
     planner, nodes = build_planner_with_random_nodes(300, seed=2)
     rng = random.Random(123)
@@ -106,7 +119,7 @@ def test_near_indices_matches_bruteforce():
         # Radius boundary is the danger zone: a node exactly at distance r can
         # land on either side under floating point. Allow a hair of tolerance
         # by only flagging disagreements NOT near the boundary.
-        disagree = kd_set ^ bf_set          # symmetric difference
+        disagree = kd_set ^ bf_set  # symmetric difference
         for i in disagree:
             d = math.hypot(nodes[i].state.x - px, nodes[i].state.y - py)
             assert abs(d - r) < 1e-6, (
@@ -114,11 +127,13 @@ def test_near_indices_matches_bruteforce():
                 f"radius {r:.6f} (not a boundary case)"
             )
 
+
 # ---------------------------------------------------------------------------
 # 3. The straggler path specifically: query RIGHT AFTER adding nodes, before
 #    any rebuild could have happened. This is the bug that silently drops the
 #    newest (often closest) nodes.
 # ---------------------------------------------------------------------------
+
 
 def test_recently_added_nodes_are_found():
     planner, nodes = build_planner_with_random_nodes(50, seed=3)
@@ -132,14 +147,17 @@ def test_recently_added_nodes_are_found():
             f"as nearest with {len(nodes)} nodes"
         )
 
+
 # ---------------------------------------------------------------------------
 # 4. Degenerate: single node, empty radius. Must not crash.
 # ---------------------------------------------------------------------------
+
 
 def test_edge_cases():
     planner, nodes = build_planner_with_random_nodes(1, seed=4)
     assert planner.nearest(nodes, State(10.0, 10.0, 0.0)) == 0
     planner.near_indices(nodes, State(10.0, 10.0, 0.0), 0.001)
+
 
 if __name__ == "__main__":
     pytest.main([__file__, "-v"])
