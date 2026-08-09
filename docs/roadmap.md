@@ -197,9 +197,10 @@ of decisions made in earlier phases; do not quietly drop them.
   costs can go stale-high; documented in `rewire`), and BECAUSE costs can
   be stale, the reported best cost is recomputed from the reconstructed
   edges rather than read from `cost_from_start`. Contract, cost-consistency,
-  and more-iterations-no-worse tests in `tests/test_rrt_star.py` (~16 min —
-  slow on purpose, they run full planning budgets); eyeball plot via
-  `scripts/eyeball_rrt_star.py`. Phase B not started.
+  and more-iterations-no-worse tests in `tests/test_rrt_star.py` (full
+  planning budgets on purpose; originally ~16 min, ~1 min since the steer
+  split below); eyeball plot via `scripts/eyeball_rrt_star.py`. Phase B not
+  started.
 - **Planner refactor, step 1 of 2 (pre–Phase B): complete.** The three
   planners now run on provably identical scaffolding, which is what makes
   their head-to-head benchmark valid (see "The progression is a result, not
@@ -214,17 +215,86 @@ of decisions made in earlier phases; do not quietly drop them.
   Behavior-preserving: full suite green (35 passed) with zero assertion
   changes — RRT*'s per-seed RNG sequence changed (the shared `sample` draws
   theta; the old RRT* sample didn't), but no seeded test flipped. Two
-  hazards recorded for the benchmark phase: `RRTConfig` and `RRTStarConfig`
-  still default to DIFFERENT margins (2.0 vs 0.0) to preserve historical
-  behavior — the harness must set margin explicitly and identically for all
-  planners; and `nearest`/`near_indices` are still deliberate O(n) linear
-  scans. **Step 2 (next):** back both spatial queries with a KD-tree inside
-  `PlannerBase` (periodic rebuild + linear scan of post-rebuild stragglers).
-  Its acceptance spec, `tests/test_kdtree.py`, is already written and
-  committed: brute-force-equivalence tests for `nearest`/`near_indices`
-  against the settled base API (built via `RRTStar`, but any planner works
-  — the methods are shared), including a straggler test that queries
-  immediately after every node add. All 4 currently pass in 0.28s — trivially,
-  since the linear scans ARE the brute-force oracle; their job is to catch
-  the KD-tree's silent failure modes (stale tree, forgotten stragglers)
-  once step 2 lands.
+  hazards were recorded for the benchmark phase: `RRTConfig` and
+  `RRTStarConfig` still default to DIFFERENT margins (2.0 vs 0.0) to
+  preserve historical behavior — the harness must set margin explicitly and
+  identically for all planners; and `nearest`/`near_indices` were still
+  deliberate O(n) linear scans (resolved by step 2, below). Step 2's
+  acceptance spec, `tests/test_kdtree.py`, was written and committed FIRST,
+  independently: brute-force-equivalence tests for `nearest`/`near_indices`,
+  including a straggler test that queries immediately after every node add —
+  trivially green against the linear scans (which ARE the oracle), existing
+  to catch the KD-tree's silent failure modes once it landed.
+- **Planner refactor, step 2 of 2 (KD-tree): complete — and it produced a
+  negative result worth keeping.** `nearest`/`near_indices` in `PlannerBase`
+  are now backed by a cached `scipy.spatial.cKDTree` over (x, y) — matching
+  the position-only base metric — rebuilt every K=50 node additions, with a
+  linear scan of post-rebuild stragglers folded into every query. Staleness
+  is guarded by three triggers (list identity, so a reused planner
+  instance's second `plan()` never queries the previous run's tree;
+  shrinkage; K new nodes) and rests on a documented append-only invariant:
+  node positions never mutate — rewire touches parent/cost, never state.
+  `near_indices` sorts the tree's hits before appending stragglers because
+  `query_ball_point` doesn't sort single-point queries and choose-parent/
+  rewire iterate the neighbourhood in order — index order is part of
+  behavior preservation. All three gates passed: owner spec 4/4 untouched,
+  full suite 41 passed with zero edits to existing tests, and
+  `scripts/time_rrt_star.py` reproduced IDENTICAL node counts
+  (331/1201/2530) and success flags. Two findings:
+  - **The baseline's super-linear s/iter was misattributed — the O(n) scans
+    were never the bottleneck.** Measured: the scans cost ~1.6s of the
+    117.8s 3000-iter baseline row; profiling shows ~99% of runtime is
+    `steer` → `rollout_variable` → `step` — Dubins edge collision rollouts
+    in choose-parent/rewire. Their per-iteration count grows with
+    neighbourhood cardinality, ~n^(1/3) since `rewire_radius` shrinks as
+    (log n / n)^(1/3): measured 12.3 → 26.6 → 41.0 steer-calls/iter across
+    the three timing rows, tracking s/iter almost exactly. The KD-tree made
+    the queries themselves 42× faster — on ~1.4% of runtime — leaving totals
+    statistically unchanged (6.99 / 42.95 / 125.54 s vs baseline
+    6.67 / 40.75 / 117.83). It stays in because it's correct,
+    behavior-identical, and removes the term that WOULD eventually dominate
+    at much larger n (scan cost grows ~n per iteration vs ~n^(1/3) for
+    steering). The feasibility problem itself was solved by the steer split
+    (next entry).
+  - **The obvious reuse test was vacuous for the guard it targeted.**
+    Mutation-testing showed a plan()-twice test alone cannot catch a missing
+    identity guard: the second call's fresh node list starts SHORTER than
+    the cached count, so the shrinkage guard fires first and masks it.
+    `tests/test_kdtree_reuse.py` therefore carries a second test swapping in
+    a same-LENGTH different list and querying exact node positions — the one
+    case only the identity guard covers. Both mutants (identity-only
+    removed; identity+shrinkage removed) verified killed.
+- **Steer split (the actual performance fix): complete.** `RRTStar.steer`
+  fused two operations of wildly different cost: `dubins_ccc` (closed-form
+  geometry, cheap) and the collision rollout (hundreds of RK4 steps, ~30×
+  dearer) — and both RRT* steps paid the expensive half for every neighbour,
+  then discarded almost all of it. `steer` is now split into the geometry
+  call plus `_edge_collision_free`, composed cheap-first: `choose_parent`
+  computes geometry + cost for ALL neighbours, sorts by cost (stable sort,
+  so exact ties keep the old first-wins order), and rolls out in ascending
+  order taking the first collision-free candidate; `rewire` compares cost
+  BEFORE rolling out, so only candidates that would actually re-parent pay
+  for a rollout. Verified NODE-EXACT against the pre-change code across 3
+  runs (500 iters × seeds 1, 3; 1500 × seed 1): parent arrays, per-node
+  `cost_from_start` to 1e-12, states bit-for-bit, and best_cost all
+  identical — the reordering changes which conjunct is evaluated first,
+  never the outcome, and touches no RNG. Numbers: 3000-iteration timing run
+  117.8s → 11.2s (~10×); `rollout_variable` calls 35,221 → 2,855 (~1.9
+  rollouts/iteration) while `dubins_ccc` calls stayed at 39,937 — exactly
+  the split's predicted signature; full test suite 16:59 → 1:24. Benchmark
+  feasibility: a 3-planner × 30-seed sweep at 3000 iterations is now ~17
+  min of RRT* compute, versus ~3 hours before. `steer` itself is retained
+  as the composed convenience (docstring updated to say so).
+
+  **Lesson, recorded so it sticks: profile before optimising.** The KD-tree
+  was built on an unprofiled assumption about where the time was going and
+  bought ~1.4%; profiling afterwards found the real bottleneck and bought
+  ~10×.
+
+  Future work, briefly: (a) s/iter still grows ~2.5× across iteration
+  counts — the ~n^(1/3) neighbourhood term now rides on the cheap
+  `dubins_ccc` call rather than the rollout; vectorising the rollout in
+  `models/` is the next lever if ever needed, NOT currently required;
+  (b) Phase B's clearance-weighted cost interacts with the cheap-first
+  ordering — see the lower-bound-prune comments in `rrt_star.py`'s `rewire`
+  and `choose_parent`.

@@ -143,8 +143,8 @@ class RRTStar(PlannerBase):
 
     def steer(self, from_state: State, to_state: State) -> DubinsPath | None:
         """Exact Dubins connection from -> to, or None if unconnectable OR the
-        edge collides. This is the ONE connection primitive choose_parent and
-        rewire both use."""
+        edge collides. Composed convenience: geometry + collision in one call. choose_parent and rewire use the two halves separately in cheap-first order — see their bodies.
+        """
         path = dubins_ccc(
             from_state,
             to_state,
@@ -155,11 +155,16 @@ class RRTStar(PlannerBase):
         if path is None:
             return None
 
+        if not self._edge_collision_free(from_state, path):
+            return None
+        return path
+
+    def _edge_collision_free(self, from_state: State, path: DubinsPath) -> bool:
         states = rollout_variable(from_state, path.controls, self.params)
         for state in states:
             if not self.env.is_free(state, self.config.margin):
-                return None
-        return path
+                return False
+        return True
 
     # --- the two RRT* steps: the heart -------------------------------------
 
@@ -172,22 +177,36 @@ class RRTStar(PlannerBase):
         Returns (best_parent_idx, best_edge, best_cost) or None if no
         neighbour can connect.
         """
-        best_parent_idx = None
-        best_edge = None
-        best_cost = np.inf
+        all_connected_paths = []
         for idx in neighbourhood:
-            edge = self.steer(nodes[idx].state, new_state)
-            if edge is not None:
-                cost = nodes[idx].cost_from_start + edge_cost(
-                    edge, self.env, self.params, self.config.clearance_weight
-                )
-                if cost < best_cost:
-                    best_parent_idx = idx
-                    best_edge = edge
-                    best_cost = cost
-        if best_edge is None:
-            return None
-        return (best_parent_idx, best_edge, best_cost)
+            path = dubins_ccc(
+                nodes[idx].state,
+                new_state,
+                self.params,
+                self.config.edge_velocity,
+                self.config.step_dt,
+            )
+            if path is None:
+                continue
+            cost = nodes[idx].cost_from_start + edge_cost(
+                path, self.env, self.params, self.config.clearance_weight
+            )
+            all_connected_paths.append((path, idx, cost))
+        # Sort ascending by cost, then rollout in that order and take the FIRST
+        # collision-free candidate: exact, because every later candidate is
+        # costlier. Python's sort is stable, so exact cost ties keep
+        # neighbourhood order (matching the old strict-< first-wins behaviour).
+        #
+        # TODO (Phase B): with a clearance penalty, this order is by LOWER
+        # BOUND (path.length), not true cost. Stopping at the first feasible
+        # candidate is then NOT exact -- you may only stop once the surviving
+        # candidate's TRUE cost beats the next candidate's lower bound.
+        # Otherwise a costlier-by-length edge with better clearance could win.
+        paths_sorted_by_cost = sorted(all_connected_paths, key=lambda item: item[2])
+        for path, idx, cost in paths_sorted_by_cost:
+            if self._edge_collision_free(nodes[idx].state, path):
+                return (idx, path, cost)
+        return None
 
     def rewire(self, nodes: list[Node], new_idx: int, neighbourhood: list[int]) -> None:
         """For each neighbour, if reaching it THROUGH the new node is cheaper,
@@ -195,16 +214,32 @@ class RRTStar(PlannerBase):
         for idx in neighbourhood:
             if idx == new_idx or idx == nodes[new_idx].parent:
                 continue
-            edge = self.steer(nodes[new_idx].state, nodes[idx].state)
-            if edge is None:
+            path = dubins_ccc(
+                nodes[new_idx].state,
+                nodes[idx].state,
+                self.params,
+                self.config.edge_velocity,
+                self.config.step_dt,
+            )
+            if path is None:
                 continue
             new_cost = nodes[new_idx].cost_from_start + edge_cost(
-                edge, self.env, self.params, self.config.clearance_weight
+                path, self.env, self.params, self.config.clearance_weight
             )
-            if new_cost < nodes[idx].cost_from_start:
-                nodes[idx].parent = new_idx
-                nodes[idx].cost_from_start = new_cost
-                nodes[idx].edge_from_parent = edge
+            # LOWER-BOUND PRUNE: skip the expensive collision rollout when this
+            # edge cannot improve on the neighbour's current cost. Exact today
+            # because edge_cost is pure geometry (path.length). Under Phase B's
+            # clearance penalty this REMAINS valid as a lower-bound prune: the
+            # penalty is additive and non-negative, so path.length <= true cost.
+            # Phase B must then compute the true (penalised) cost AFTER the
+            # rollout for candidates that survive this bail.
+            if new_cost >= nodes[idx].cost_from_start:
+                continue
+            if not self._edge_collision_free(nodes[new_idx].state, path):
+                continue
+            nodes[idx].parent = new_idx
+            nodes[idx].cost_from_start = new_cost
+            nodes[idx].edge_from_parent = path
         # NOTE: re-parenting i lowers its cost; i's descendants keep their (now
         # slightly stale) cost_from_start. Accepted simplification: paths stay
         # valid, only optimality is mildly affected. Not propagating the delta
