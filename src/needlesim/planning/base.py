@@ -29,6 +29,7 @@ import math
 from dataclasses import dataclass
 
 import numpy as np
+from scipy.spatial import cKDTree
 
 from needlesim.models.unicycle_needle import NeedleParams, State
 
@@ -77,6 +78,16 @@ class PlannerBase:
         # Validate the is_arc_free spacing invariant up front so its assert
         # can never fire mid-run.
         assert config.edge_velocity * config.step_dt <= 0.5 * env.resolution
+        # KD-tree cache backing nearest()/near_indices(). Rebuilt every K node
+        # additions; nodes added since the last rebuild ("stragglers") are
+        # covered by a short linear scan inside each query.
+        self._kdtree = None  # scipy cKDTree over indexed node positions
+        self._kdtree_count = 0  # how many nodes (prefix of the list) it covers
+        self._kdtree_nodes_ref = None  # identity of the list it was built from
+        self._kdtree_rebuild_every = 50  # K: constant for now. TODO: an adaptive
+        # policy (rebuild when stragglers exceed a fraction of the tree) may be
+        # better once the benchmark profiles real workloads; keep constant K
+        # until measurement says otherwise.
 
     def sample(self) -> State:
         """Draw a random target pose from the environment bounds.
@@ -93,33 +104,84 @@ class PlannerBase:
         theta = self.rng.uniform(0, 2 * np.pi)
         return State(x, y, theta)
 
+    def _ensure_kdtree(self, nodes: list) -> None:
+        """Rebuild the cached KD-tree if it is stale. Called by both spatial
+        queries before touching the tree.
+
+        Three rebuild triggers:
+        - Identity (`is not`): the cache lives on the instance but the node
+          list is per-`plan()`-call. A reused planner's second `plan()` passes
+          a brand-new list; without this check the stale tree answers queries
+          about nodes from the previous run. O(1) pointer comparison.
+        - Shrinkage: a shorter list than `_kdtree_count` means indices into
+          the tree are meaningless. O(1).
+        - K new nodes: the routine staleness rebuild.
+        """
+        # INVARIANT: `nodes` is append-only between queries. Positions of
+        # already-indexed nodes never change; nodes are never removed or
+        # reordered. All three planners satisfy this (rewire mutates
+        # parent/cost, never state). The identity and shrinkage guards catch
+        # list REPLACEMENT and truncation cheaply; per-node mutation is NOT
+        # detectable without an O(n) scan that would defeat the KD-tree's
+        # purpose.
+        if (
+            nodes is not self._kdtree_nodes_ref  # different list object
+            or len(nodes) < self._kdtree_count  # list shrank
+            or len(nodes) - self._kdtree_count >= self._kdtree_rebuild_every
+        ):
+            # cKDTree rejects an empty point list; an empty tree is
+            # represented as None and queries fall through to the straggler
+            # scan (which then covers the whole list).
+            if nodes:
+                self._kdtree = cKDTree([(n.state.x, n.state.y) for n in nodes])
+            else:
+                self._kdtree = None
+            self._kdtree_nodes_ref = nodes
+            self._kdtree_count = len(nodes)
+
     def nearest(self, nodes: list, target: State) -> int:
         """Return the INDEX of the tree node closest to `target`.
 
-        "Closest" is defined by self.distance. Linear scan, O(n) per call --
-        deliberately so for now (see docs/roadmap.md; a KD-tree is a later,
-        separate step).
+        "Closest" is defined by self.distance (position-only Euclidean; the
+        KD-tree is built over (x, y) to match). KD-tree query over the
+        indexed prefix, plus a linear scan of the straggler slice added since
+        the last rebuild; whichever is closer wins. On an exact tie the
+        indexed (lower-index) node wins, matching the old linear scan's
+        first-match behaviour.
         """
+        self._ensure_kdtree(nodes)
         closest_node_idx = -1
         closest_distance = np.inf
-        for idx, node in enumerate(nodes):
-            node_distance = self.distance(target, node.state)
-            if closest_distance > node_distance:
+        if self._kdtree is not None and self._kdtree_count > 0:
+            closest_distance, idx = self._kdtree.query((target.x, target.y))
+            closest_node_idx = int(idx)
+        for idx in range(self._kdtree_count, len(nodes)):
+            node_distance = self.distance(target, nodes[idx].state)
+            if node_distance < closest_distance:
                 closest_distance = node_distance
                 closest_node_idx = idx
         return closest_node_idx
 
     def near_indices(self, nodes: list, target: State, radius: float) -> list[int]:
-        """Indices of all nodes within `radius` of target.
+        """Indices of all nodes within `radius` of target (inclusive, matching
+        cKDTree.query_ball_point's boundary).
 
         Unlike nearest(), returns the whole neighbourhood (RRT* needs it for
-        choose-parent and rewire). Lives in the base alongside nearest() on
-        purpose: both spatial queries are co-located so a later step can back
-        them with one shared structure. Linear scan, O(n) per call.
+        choose-parent and rewire). Indexed hits come from query_ball_point,
+        straggler hits from a linear scan of the slice added since the last
+        rebuild. The indexed hits are sorted ascending before the (already
+        ascending) stragglers are appended, preserving the old linear scan's
+        ascending-index order -- RRT*'s choose-parent and rewire iterate this
+        list in order, so ordering is part of behaviour preservation.
         """
+        self._ensure_kdtree(nodes)
         indices_within_radius = []
-        for idx, node in enumerate(nodes):
-            if self.distance(target, node.state) <= radius:
+        if self._kdtree is not None and self._kdtree_count > 0:
+            indices_within_radius = sorted(
+                self._kdtree.query_ball_point((target.x, target.y), radius)
+            )
+        for idx in range(self._kdtree_count, len(nodes)):
+            if self.distance(target, nodes[idx].state) <= radius:
                 indices_within_radius.append(idx)
         return indices_within_radius
 
