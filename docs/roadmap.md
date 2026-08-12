@@ -360,3 +360,44 @@ of decisions made in earlier phases; do not quietly drop them.
   length must be small relative to turning radius, and turning radius small
   relative to scene features. Violate either and the planner degrades in a
   way that looks like a bug.
+- **Benchmark: complete (VanillaRRT vs KinodynamicRRT; RRT\* excluded per
+  Task 3.6).** The PRIMARY benchmark from Task 3.6's revised scope is built,
+  run, and written up. Full numbers and the four figure findings live in
+  `docs/benchmark_results.md`; this is the one-paragraph pointer.
+
+  Structure (`src/needlesim/benchmark/`): `scenarios.py` holds `Scenario` as
+  plain frozen data + `build_env` (the only thing touching `GridEnvironment`),
+  so hand-designed and random scenarios are one type the harness treats
+  uniformly. Four hand-designed scenarios, two of them tuned from a fine
+  difficulty sweep (`experiments/results/scenario_tuning/`, gitignored):
+  `open` (baseline, both 30/30), `constrained_passage` (16mm gap off-axis,
+  Kino 19/30 — a rate scenario), `target_behind` (goal symmetric behind the
+  obstacle, Kino 0/30 — a deliberate PASS/FAIL, because the in-band region is
+  a 2° knife edge), `cluttered` (Kino 29/30). This RESOLVES Task 3.6's open
+  question — `constrained_passage` is exactly the doorway-shape scenario that
+  gives vanilla's speed advantage something to bite on. `random_scenarios.py`
+  is a seeded generator (30 scenarios persisted to the tracked
+  `experiments/random_scenarios.json`, byte-reproducible) with the
+  distribution stated in its docstring; overlaps permitted, no solvability
+  screening.
+
+  `harness.py` runs the 840-run grid (4×2×30 + 30×2×10), one CSV row per run,
+  appended live and resumable; metrics computed by rolling controls through
+  the ONE real model (κ=1/50): path_cost, endpoint_error, and heading
+  discontinuity. `run_benchmark.py` → `experiments/results/benchmark_raw.csv`
+  (gitignored, regenerable); `analyze_benchmark.py` → the tables;
+  `plot_benchmark_figures.py` → `docs/figures/benchmark_*.png` (tracked; the
+  near-median-cost representative seed per cell).
+
+  **The result — feasibility, not just optimality.** VanillaRRT is fast
+  (~0.05s) but its paths are DISCONTINUOUS (heading disc order-1 rad at 27–37
+  nodes) and, executed on the real needle, land 133–230mm off in a 150mm
+  workspace — they leave the arena, diverging from step one, which the figures
+  show directly. KinodynamicRRT is ~35–50× slower and loses some scenarios to
+  the curvature constraint, but its paths are continuous (heading disc
+  **exactly 0.000** across all 325 successful runs), land 1.8–2.3mm off, and
+  are actually SHORTER. Random set: both 26/30, vanilla-only 4/30, kino-only 0,
+  neither 0 (the last is seed-specific — Vanilla solved all 30, so the
+  unsolvable tail did not appear at this generator seed). No true-vs-model
+  mismatch is introduced yet; Vanilla's endpoint error is purely its
+  point-robot planning cheat. That mismatch axis is Phase 3.
