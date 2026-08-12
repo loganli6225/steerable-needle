@@ -42,7 +42,7 @@ import numpy as np
 
 from needlesim.models.unicycle_needle import NeedleParams, State, rollout_variable
 from needlesim.planning.base import BasePlannerConfig, PlannerBase
-from needlesim.planning.dubins import DubinsPath, dubins_ccc
+from needlesim.planning.dubins import DubinsPath, dubins_ccc, dubins_full
 
 # ---------------------------------------------------------------------------
 # THE TWO ISOLATED CHOICES. Change behaviour here, not scattered through code.
@@ -128,7 +128,10 @@ class RRTStarConfig(BasePlannerConfig):
     # cost
     clearance_weight: float = 0.0  # 0.0 = length-only (Phase A). >0 = Phase B.
     margin: float = 0.0  # is_arc_free margin [mm]
-
+    use_full_dubins: bool = True   # False = CCC-only (arc-only steering).
+    # CCC-only collapses at realistic curvature (~98.5% sample rejection at
+    # R=50mm in a 150mm world) -- keep the switch so that finding stays
+    # reproducible.
 
 # ---------------------------------------------------------------------------
 # The planner.
@@ -145,7 +148,8 @@ class RRTStar(PlannerBase):
         """Exact Dubins connection from -> to, or None if unconnectable OR the
         edge collides. Composed convenience: geometry + collision in one call. choose_parent and rewire use the two halves separately in cheap-first order — see their bodies.
         """
-        path = dubins_ccc(
+        steer_fn = dubins_full if self.config.use_full_dubins else dubins_ccc
+        path = steer_fn(
             from_state,
             to_state,
             self.params,
@@ -177,9 +181,10 @@ class RRTStar(PlannerBase):
         Returns (best_parent_idx, best_edge, best_cost) or None if no
         neighbour can connect.
         """
+        steer_fn = dubins_full if self.config.use_full_dubins else dubins_ccc
         all_connected_paths = []
         for idx in neighbourhood:
-            path = dubins_ccc(
+            path = steer_fn(
                 nodes[idx].state,
                 new_state,
                 self.params,
@@ -211,10 +216,11 @@ class RRTStar(PlannerBase):
     def rewire(self, nodes: list[Node], new_idx: int, neighbourhood: list[int]) -> None:
         """For each neighbour, if reaching it THROUGH the new node is cheaper,
         re-parent it to the new node and update its cost."""
+        steer_fn = dubins_full if self.config.use_full_dubins else dubins_ccc
         for idx in neighbourhood:
             if idx == new_idx or idx == nodes[new_idx].parent:
                 continue
-            path = dubins_ccc(
+            path = steer_fn(
                 nodes[new_idx].state,
                 nodes[idx].state,
                 self.params,

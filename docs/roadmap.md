@@ -17,6 +17,7 @@ Read this before proposing that a phase be skipped, merged, or reordered.
 | **Task 2** | obstacle maps + collision checking | the environment |
 | **Task 3** | vanilla RRT → kinodynamic RRT | planning |
 | **Task 3.5** | Dubins CCC exact steering | the connect-exactly primitive RRT* rewiring needs |
+| **Task 3.6** | full Dubins (CSC + CCC) steering | straight segments; and the RRT*-doesn't-scale finding |
 | **Task 4** | RRT* with Dubins steering, length-only cost ("Phase A") | optimality: choose-parent + rewire |
 | **Refactor** | step 1: shared `PlannerBase`; step 2: KD-tree spatial queries | benchmark-valid shared scaffolding |
 | **Phase B** | clearance-weighted edge cost for RRT* | cost-aware planning (trades strict optimality for safety) |
@@ -298,3 +299,64 @@ of decisions made in earlier phases; do not quietly drop them.
   (b) Phase B's clearance-weighted cost interacts with the cheap-first
   ordering — see the lower-bound-prune comments in `rrt_star.py`'s `rewire`
   and `choose_parent`.
+- **Task 3.6: full Dubins (CSC + CCC) steering — complete, and it produced
+  a scope-changing negative result.** `dubins.py` gained the four CSC words
+  (LSL, RSR, LSR, RSL) alongside the Task 3.5 CCC pair, plus `dubins_full`
+  (shortest of all six). `dubins_ccc` is retained unchanged and
+  `RRTStarConfig.use_full_dubins` (default True) switches between them, so
+  CCC-only stays reproducible rather than being deleted. The S segment is the
+  duty-cycle idealisation (`kappa_eff = kappa*(2p-1)`, so p=0.5 is a straight
+  centerline) made concrete in `_discretise_straight`: alternating b=+/-1
+  with half-steps at each end. Measured at v=5, dt=0.05, kappa=1/50 over a
+  100mm segment: max perpendicular deviation 0.0003mm, endpoint shortfall
+  0.0001mm, heading error exactly 0, arc length exact -- 0.015% of the 2mm
+  planning margin, effectively free. (The naive +1/-1 alternation without the
+  end half-steps bows one-sided at 0.25mm, ~800x worse; the half-steps centre
+  the oscillation on the line.)
+
+  **The finding (a result, not a footnote -- it changes the benchmark's
+  scope): full Dubins fixed reachability but NOT tractability.** On the
+  physically-grounded common scenario (R = 1/kappa = 50mm -- the optimistic
+  end of the literature's 40-170mm range -- 150x150mm workspace, r=20mm
+  obstacle, margin 2mm), RRT* built 155 nodes in 10,000 iterations (~98.5%
+  sample rejection) and failed to reach the goal -- IDENTICAL node count and
+  failure with CCC-only and with full Dubins (verified:
+  `scripts/verify_common_scenario.py`). The word family was never the binding
+  constraint. Root cause, measured directly: local pose-to-pose connections
+  10-25mm apart at R=50mm cost a median of ~330mm (matched headings 332mm; the
+  planner's derived nearest-node-toward-sample headings similar; random
+  headings ~0% usable), because the needle's minimum turning circle is 314mm
+  in circumference, so small heading corrections require most of a loop --
+  and those loops sweep the whole workspace and collide. Only ~3-5% of local
+  connections come in under 60mm. By contrast KinodynamicRRT succeeded on the
+  same scenario (1883 nodes, 3005 iterations) and VanillaRRT trivially (103
+  nodes, 120 iterations).
+
+  This is a STRUCTURAL mismatch, not an implementation problem. RRT* requires
+  exact pose-to-pose connection because rewiring is defined in terms of it --
+  to ask whether node X is cheaper through the new node you must connect
+  new-node to X exactly. Kinodynamic RRT never makes that demand: it advances
+  the needle forward under b=+/-1 and accepts where it lands. Real needle
+  insertion is monotonic, forward-directed, and roughly heading-aligned, so
+  the arbitrary pose-to-pose connections RRT* needs do not arise clinically.
+  RRT* therefore requires a capability the task does not need and the
+  hardware cannot provide at anatomical scale.
+
+  Benchmark scope, revised (future work, not a started task): PRIMARY is
+  VanillaRRT vs KinodynamicRRT on the 150mm anatomically-scaled scenario at
+  realistic curvature, with the RRT* limitation above reported as a finding;
+  SECONDARY is RRT* at an enlarged (~500mm) workspace, where the turning
+  radius is small relative to scene features, to demonstrate it functions
+  when the scaling permits and to compare path quality against the others
+  there. Open question (not a task): the current 150mm scenario is solved by
+  VanillaRRT in ~120 iterations, so it is too easy to discriminate planners
+  on efficiency alone. A constrained-passage scenario (the Task 3 doorway
+  shape) is likely needed so vanilla's speed advantage does not dominate the
+  table and the path-feasibility metric has something to bite on.
+
+  Lesson, recorded so it sticks: this is the third time curvature-vs-scene
+  scaling has been the hidden cause of a planner failure (RRT* looping at
+  R=20/50 in Task 4, the 8mm doorway, now this). The governing ratios: edge
+  length must be small relative to turning radius, and turning radius small
+  relative to scene features. Violate either and the planner degrades in a
+  way that looks like a bug.

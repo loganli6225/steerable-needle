@@ -14,15 +14,29 @@ At REALISTIC curvature it does not. The literature puts bevel-tip radii of
 curvature at roughly 40-170mm (optimised tip designs reach <50mm; plain bevel
 tips are often ~160mm or negligible). At R=50mm in a 150mm workspace, every
 CCC connection between two nearby poses is a giant loop comparable to the
-whole world, so nearly all of them collide: measured RRT* rejection was ~98.5%
-(155 nodes in 10,000 iterations) -- the planner could not build a tree.
+whole world, so nearly all of them collide.
 
-The resolution is not a fudge. The needle CAN travel effectively straight, by
-DUTY CYCLING: alternating b=+1/-1 gives kappa_eff = kappa*(2p-1), so p=0.5 is
-a straight centerline. This is a real, physically available capability, and it
-is already verified in this codebase (tests/test_needle_model.py ::
-test_duty_cycle_scales_curvature). Excluding S segments made the PLANNER more
-restrictive than the HARDWARE.
+The needle CAN travel effectively straight, by DUTY CYCLING: alternating
+b=+1/-1 gives kappa_eff = kappa*(2p-1), so p=0.5 is a straight centerline.
+This is a real, physically available capability, and it is already verified in
+this codebase (tests/test_needle_model.py :: test_duty_cycle_scales_curvature).
+Excluding S segments made the PLANNER more restrictive than the HARDWARE, so
+CSC is the honest connection primitive to expose.
+
+WHAT THE S SEGMENTS DID AND DID NOT FIX (measured -- Task 3.6 finding)
+---------------------------------------------------------------------
+They fixed REACHABILITY, not TRACTABILITY. CSC makes almost any two poses
+connectable (dubins_full rarely returns None), but it did NOT rescue RRT*:
+on the common scenario (R=50mm, 150x150mm world, r=20mm obstacle, margin 2mm)
+RRT* built ~155 nodes in 10,000 iterations (~98.5% sample rejection) and
+failed to reach the goal -- IDENTICAL with CCC-only and with full Dubins
+(verified: scripts/verify_common_scenario.py). The word family was never the
+binding constraint: at R=50mm even a full-Dubins connection between two poses
+with mismatched headings needs most of a 314mm turning circle to fix heading,
+and those loops sweep the workspace and collide. That is a STRUCTURAL limit of
+RRT*'s exact-pose-to-pose requirement at anatomical scale, not a word-family
+gap -- see docs/roadmap.md (Task 3.6) for the full finding and the revised
+benchmark scope (RRT* moves to a SECONDARY, enlarged-workspace role).
 
 MODELLING ASSUMPTION TO STATE IN THE WRITEUP
 --------------------------------------------
@@ -52,8 +66,9 @@ VERIFIED GEOMETRIC FACTS (checked numerically; build on these)
   only when d >= 2R; straight length = sqrt(d^2 - 4R^2). Return no candidate
   when d < 2R.
 - Unlike CCC, CSC has NO 4R limit -- distant poses are always connectable via
-  a long S. Consequence: dubins_full almost never returns None, which is
-  exactly what fixes the planner's rejection rate.
+  a long S. Consequence: dubins_full almost never returns None. This fixes
+  REACHABILITY (the None-rate), NOT RRT*'s sample rejection -- see the
+  measured Task 3.6 finding above.
 """
 
 from __future__ import annotations
@@ -278,9 +293,10 @@ def dubins_ccc(
     """Shortest CCC (arc-arc-arc) path, or None. ARC-ONLY -- no straight.
 
     KEPT DELIBERATELY, not dead code: `dubins_full` vs `dubins_ccc` is a
-    runnable comparison, and the finding that CCC-only collapses at realistic
-    curvature (~98.5% RRT* sample rejection at R=50mm in a 150mm world) is a
-    result worth being able to reproduce.
+    runnable comparison, and the finding is that BOTH collapse identically at
+    realistic curvature (~98.5% RRT* sample rejection at R=50mm in a 150mm
+    world, same node count either way) -- reproducing that equality is the
+    point, since it shows the word family was never the binding constraint.
 
     KEEP YOUR TASK 3.5 BODY HERE UNCHANGED. If you factored the discretisation
     into _discretise_arc, call it here too so both families trim identically.
@@ -347,8 +363,10 @@ def dubins_full(
 
     NOTE: with CSC available this essentially never returns None -- any two
     poses connect via turn/straight/turn. The planners' None-handling paths
-    stay correct but become rare. That is the whole point: it is what lifts
-    RRT*'s sample acceptance at realistic curvature.
+    stay correct but become rare. That fixes REACHABILITY only: measured, it
+    did NOT lift RRT*'s sample acceptance at realistic curvature (identical
+    ~98.5% rejection with CCC-only and full Dubins -- Task 3.6 finding, see
+    the module docstring).
 
     Do NOT assume CCC is always beaten by CSC. For poses close together
     relative to R, a CCC path is often shorter -- that is exactly the regime
