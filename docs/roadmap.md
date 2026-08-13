@@ -401,3 +401,42 @@ of decisions made in earlier phases; do not quietly drop them.
   unsolvable tail did not appear at this generator seed). No true-vs-model
   mismatch is introduced yet; Vanilla's endpoint error is purely its
   point-robot planning cheat. That mismatch axis is Phase 3.
+- **Secondary benchmark (all three planners at enlarged scale): complete — and
+  it FALSIFIES the strong hypothesis it was built to test.** Full numbers,
+  calibration, and figures-of-the-argument live in
+  `docs/benchmark_scaled_results.md`; this is the one-paragraph pointer. Task
+  3.6 deferred a SECONDARY experiment: rerun RRT* at an enlarged (~500mm)
+  workspace where R=50mm is small relative to scene features, to show its
+  primary-scale exclusion is a consequence of SCALE, not a broken planner. The
+  strong version of that — "where all three function, RRT*'s optimisation buys
+  BETTER paths than kinodynamic's first-found path" — is the one I tested, so
+  all three planners run, not just RRT*.
+
+  Structure (`src/needlesim/benchmark/`): `scaled_scenarios.py` is a pure ×10/3
+  geometric transform of the primary `HAND_DESIGNED` four (workspace, obstacles,
+  start/goal, goal_tolerance, and resolution all scale; **margin and kappa and
+  n_steps_per_extend do NOT** — the needle is unchanged, only the scene grows,
+  preserving the edge/R=0.1 ratio). `harness_scaled.py` reuses the primary
+  metric code for the RRT family wholesale and adds three RRT*-only adapters (its
+  result carries `control_dt_pairs`/`best_cost`, a different shape); separate CSV
+  (`benchmark_scaled_raw.csv`), never pooled with the primary. Two calibrated,
+  reported-not-equalised budgets: RRT family 20000, RRT* 5000 (cost plateaus by
+  5000). One required finding from calibration: **RRT*'s rewire radius is in mm,
+  so gamma must scale ×10/3 to ~133 — at the default 40 its neighbourhoods
+  shrink below the enlarged scene and it fails EVERY run.**
+
+  **The result.** RRT* is implementable and correct at scale (continuous,
+  on-target paths — heading disc 0.000 across all 16 successful runs, endpoint
+  error within tol), so the primary exclusion is genuinely about scale. But it
+  is **4.4–5.7× LONGER and 40–263× slower** than kinodynamic on every scenario
+  where both succeed (open +443%, constrained +568%, target_behind +502%;
+  cluttered RRT\* 0/10 so no comparison), because enlargement let its
+  minimum-turning-circle loops FIT without colliding but did nothing to shorten
+  them. RRT*'s reliability also collapses with clutter (9/10 → 5/10 → 2/10 →
+  **0/10**) while **kinodynamic is 10/10 on all four**. Notable side-result: at
+  this scale kinodynamic SOLVES `target_behind` 10/10 (0/30 at primary scale) —
+  the symmetric split-effort failure was scale-dependent — so target_behind is
+  no longer a discriminating PASS/FAIL here. Net: the finding SHARPENS the
+  primary result — RRT* is unsuited on two independent grounds (can't connect at
+  anatomical scale; dominated by the turning-circle cost floor even when it
+  can), not merely excluded.
