@@ -55,6 +55,24 @@ stated before the data and then refuted by it is recorded here deliberately,
 not omitted; the falsification is what sharpens the exclusion from "can't run
 here" to "wouldn't help even if it could."
 
+**The obvious fix for ground 2 was tested, and it does not rescue RRT*.** The
+turning-circle loops are heading reconciliation, so the standard remedy is a
+max-edge-length (steering-horizon) constraint: reject any Dubins edge longer
+than a threshold below the ~314mm loop. Sweeping that threshold on scaled `open`
+(see `docs/max_edge_length_experiment.md`) shows the loops are *structural*, not
+wasteful detours to cap away — crossing below 314mm spikes the `choose_parent`
+rejection rate ~57% → ~97% and collapses the tree ~14×, exactly the predicted
+starvation. Where capping nonetheless "helps" (permissive `open`: cost drops
+5.7× to ~392mm, matching kinodynamic, with the loops visibly *gone*, not
+truncated), it does so only by forcing RRT* to connect short, near-heading-
+aligned edges — i.e. by making it behave like kinodynamic RRT, at kinodynamic's
+cost, while still paying RRT*'s rewiring overhead. On the harder
+`constrained_passage`, where arbitrary-pose connection is actually needed, the
+same cap starves the planner to 0/5. So the constraint buys a *tie* on the easy
+scenario and an outright *loss* on the harder one — it removes the exact-
+connection capability that was RRT*'s only reason for being here, confirming
+ground 2 rather than overturning it.
+
 **One qualification, so a primary result is not overclaimed.** `target_behind`
 fails kinodynamic 0/30 at the primary scale — effort splits symmetrically
 between two equal detours, neither completing in budget — but is solved 10/10
