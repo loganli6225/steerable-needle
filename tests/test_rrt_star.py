@@ -123,5 +123,52 @@ def test_tree_acyclic():
         assert 0 <= node.parent < len(nodes)
 
 
+# ---- max_edge_length steering horizon --------------------------------------
+
+
+def test_max_edge_length_default_is_inf():
+    """The default must impose NO constraint, preserving existing behaviour."""
+    assert RRTStarConfig().max_edge_length == float("inf")
+
+
+def test_max_edge_length_rejects_long_edges():
+    """A threshold below an edge's Dubins length makes that edge unconnectable in
+    choose_parent, while inf accepts it. Uses a reversed-heading target so the
+    connecting edge is a long heading-reconciliation arc, well clear of the
+    obstacle so rejection is due to the horizon, not a collision."""
+    from needlesim.planning.dubins import dubins_full
+    from needlesim.planning.rrt_star import Node
+
+    env = make_env()
+    params = NeedleParams(kappa=1.0 / 5.0)
+    from_state = State(20.0, 20.0, math.pi / 2)
+    to_state = State(25.0, 22.0, -math.pi / 2)  # reversed heading -> long edge
+
+    path = dubins_full(from_state, to_state, params, 5.0, 0.05)
+    assert path is not None, "expected a connectable (if long) edge"
+    long_len = path.length
+
+    def planner_with(max_edge_length):
+        cfg = RRTStarConfig(
+            max_iterations=1,
+            goal_tolerance=3.0,
+            step_dt=0.05,
+            edge_velocity=5.0,
+            gamma=40.0,
+            max_edge_length=max_edge_length,
+            seed=0,
+        )
+        return RRTStar(env, params, cfg)
+
+    nodes = [Node(from_state, parent=None, cost_from_start=0.0)]
+
+    # inf: connects (returns a parent tuple).
+    assert planner_with(float("inf")).choose_parent(nodes, to_state, [0]) is not None
+    # threshold below the edge length: rejected -> None.
+    assert planner_with(long_len * 0.5).choose_parent(nodes, to_state, [0]) is None
+    # threshold above the edge length: still connects.
+    assert planner_with(long_len * 1.5).choose_parent(nodes, to_state, [0]) is not None
+
+
 if __name__ == "__main__":
     pytest.main([__file__, "-v"])

@@ -440,3 +440,27 @@ of decisions made in earlier phases; do not quietly drop them.
   primary result — RRT* is unsuited on two independent grounds (can't connect at
   anatomical scale; dominated by the turning-circle cost floor even when it
   can), not merely excluded.
+- **Max-edge-length (steering-horizon) experiment: complete — answer is "both,
+  scenario-dependent," and it confirms the loops are structural.** Full numbers
+  and figures in `docs/max_edge_length_experiment.md`; one-paragraph pointer
+  here. Tests whether rejecting Dubins edges longer than a threshold X (below the
+  ~314mm loop signature) helps RRT* (short-edge tree, lower cost) or starves it
+  (loops are the only way to reconcile arbitrary sampled headings, so forbidding
+  them makes pairs unconnectable). Source change is minimal and gated:
+  `RRTStarConfig.max_edge_length: float = inf` (default preserves behaviour —
+  verified EXACT, scaled `open` seed 5 reproduces nodes=2203, cost=2340.1289…),
+  checked in `choose_parent`/`rewire`/`steer` after `dubins_full` and before the
+  rollout (cheap-first); two new tests. The `choose_parent` rejection rate is the
+  unifying diagnostic (measured via a counting subclass in the experiment script,
+  no source change). **Result:** crossing below 314mm spikes rejection ~57% →
+  ~97% and collapses the tree ~14× (the predicted starvation MECHANISM is real),
+  but on permissive `open` the short-edge survivors chain into DIRECT paths at
+  ~392mm — matching kinodynamic's ~405mm (5.7× cheaper than unconstrained RRT*)
+  with success preserved (4/5); the figures show the loops genuinely DISAPPEAR,
+  not truncate. On harder `constrained_passage` the SAME cap starves to 0/5.
+  Net: does NOT rescue RRT* — where capping helps it does so by making RRT*
+  connect only short heading-aligned edges (i.e. becoming kinodynamic-like, and
+  tying its cost), and where arbitrary-pose connection is actually needed it
+  kills the planner. The secondary experiment's turning-circle-floor finding
+  STANDS, sharpened: the loops are the price of exact arbitrary-heading
+  connection, not wasteful detours to cap away.

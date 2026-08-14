@@ -128,10 +128,19 @@ class RRTStarConfig(BasePlannerConfig):
     # cost
     clearance_weight: float = 0.0  # 0.0 = length-only (Phase A). >0 = Phase B.
     margin: float = 0.0  # is_arc_free margin [mm]
-    use_full_dubins: bool = True   # False = CCC-only (arc-only steering).
+    use_full_dubins: bool = True  # False = CCC-only (arc-only steering).
     # CCC-only collapses at realistic curvature (~98.5% sample rejection at
     # R=50mm in a 150mm world) -- keep the switch so that finding stays
     # reproducible.
+    # STEERING HORIZON: reject any Dubins edge longer than this [mm]. Purpose is
+    # to test whether forbidding the long heading-reconciliation loops (~314mm at
+    # R=50mm) forces the tree onto short edges and lowers path cost, or simply
+    # makes arbitrary-heading node pairs unconnectable and starves the tree. The
+    # default inf imposes NO constraint, preserving existing behaviour exactly.
+    # Checked immediately after the Dubins geometry returns and BEFORE the
+    # collision rollout (cheap-first) in choose_parent/rewire/steer.
+    max_edge_length: float = float("inf")
+
 
 # ---------------------------------------------------------------------------
 # The planner.
@@ -157,6 +166,8 @@ class RRTStar(PlannerBase):
             self.config.step_dt,
         )
         if path is None:
+            return None
+        if path.length > self.config.max_edge_length:
             return None
 
         if not self._edge_collision_free(from_state, path):
@@ -193,6 +204,10 @@ class RRTStar(PlannerBase):
             )
             if path is None:
                 continue
+            # Steering horizon: reject over-long edges before the rollout (cheap:
+            # length is already on the returned path). inf default = no-op.
+            if path.length > self.config.max_edge_length:
+                continue
             cost = nodes[idx].cost_from_start + edge_cost(
                 path, self.env, self.params, self.config.clearance_weight
             )
@@ -228,6 +243,10 @@ class RRTStar(PlannerBase):
                 self.config.step_dt,
             )
             if path is None:
+                continue
+            # Steering horizon (see choose_parent): reject over-long edges before
+            # the cost/rollout work. inf default = no-op.
+            if path.length > self.config.max_edge_length:
                 continue
             new_cost = nodes[new_idx].cost_from_start + edge_cost(
                 path, self.env, self.params, self.config.clearance_weight
