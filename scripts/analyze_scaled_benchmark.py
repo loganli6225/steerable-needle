@@ -62,6 +62,40 @@ def report_per_scenario(rows):
             )
 
 
+def report_vanilla_tracked(rows):
+    """VanillaRRT's tracked-execution metrics at scale (endpoint_error_mm is
+    empty for vanilla by design -- see vanilla_tracker.py). Same three tracker
+    metrics as the primary analysis: tracked endpoint, max cross-track, collide
+    rate. At 500mm the point-robot fiction is starker still."""
+    print()
+    print("=" * 92)
+    print("VANILLA TRACKED EXECUTION (open-loop segment following; vanilla only)")
+    print("=" * 92)
+    grouped = defaultdict(list)
+    for r in rows:
+        if r["planner"] == "VanillaRRT":
+            grouped[r["scenario_name"]].append(r)
+
+    header = (
+        f"{'scenario':<22} {'succ':>6} {'tracked_endpt_mm':>18} "
+        f"{'max_xtrack_mm':>16} {'collides':>10}"
+    )
+    print("\n" + header)
+    print("-" * len(header))
+    for scen in SCALED_HAND_DESIGNED:
+        runs = grouped.get(scen.name, [])
+        ok = [r for r in runs if _success(r)]
+        rate = f"{len(ok)}/{len(runs)}"
+        ep = _mean_std([_to_float(r, "tracked_endpoint_error_mm") for r in ok])
+        ct = _mean_std([_to_float(r, "tracked_max_crosstrack_mm") for r in ok])
+        n_col = sum(1 for r in ok if r["tracked_collides"] == "True")
+        col = f"{n_col}/{len(ok)}" if ok else "--"
+        print(
+            f"{scen.name:<22} {rate:>6} {_fnum(*ep, width=14, prec=1)} "
+            f"{_fnum(*ct, width=12, prec=1)} {col:>10}"
+        )
+
+
 def report_cost_comparison(rows):
     """RRT* vs Kinodynamic path cost on scenarios where BOTH succeed. Paired by
     scenario over the seed means -- the headline number of the experiment."""
@@ -136,6 +170,7 @@ def main():
     rows = load_rows(csv_path)
     print(f"Read {len(rows)} raw records from {csv_path}\n")
     report_per_scenario(rows)
+    report_vanilla_tracked(rows)
     report_cost_comparison(rows)
     report_target_behind(rows)
     print("\n(cost/time/iters/endpt/hdisc are mean +- std over SUCCESSFUL runs)")

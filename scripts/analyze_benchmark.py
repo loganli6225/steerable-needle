@@ -30,7 +30,10 @@ PLANNER_ORDER = ["VanillaRRT", "KinodynamicRRT"]
 
 
 def _mean_std(values):
-    """(mean, std) over a list; (nan, nan) if empty, std=0 for a single value."""
+    """(mean, std) over a list; (nan, nan) if empty, std=0 for a single value.
+    None entries are dropped (e.g. VanillaRRT's now-empty endpoint_error_mm, or
+    the tracked_* columns on non-vanilla rows)."""
+    values = [v for v in values if v is not None]
     if not values:
         return math.nan, math.nan
     n = len(values)
@@ -98,6 +101,64 @@ def report_hand_designed(rows):
             )
 
 
+def _collide_rate(runs):
+    """Fraction of successful VanillaRRT runs whose tracked trajectory collides,
+    as 'k/n'. Empty runs -> '--'."""
+    ok = [r for r in runs if _success(r)]
+    if not ok:
+        return "--"
+    n_col = sum(1 for r in ok if r["tracked_collides"] == "True")
+    return f"{n_col}/{len(ok)}"
+
+
+def report_vanilla_tracked(rows):
+    """VanillaRRT's execution quality under the open-loop tracker (its
+    endpoint_error_mm is intentionally empty -- see vanilla_tracker.py). The
+    three tracker metrics: where the tracked path lands, how far it strays from
+    the planned polyline, and -- the headline -- how often it collides."""
+    print()
+    print("=" * 78)
+    print("VANILLA TRACKED EXECUTION (open-loop segment following; vanilla only)")
+    print("=" * 78)
+    hand = [
+        r for r in rows if r["scenario_kind"] == "hand" and r["planner"] == "VanillaRRT"
+    ]
+    rand = [
+        r
+        for r in rows
+        if r["scenario_kind"] == "random" and r["planner"] == "VanillaRRT"
+    ]
+    grouped = defaultdict(list)
+    for r in hand:
+        grouped[r["scenario_name"]].append(r)
+
+    header = (
+        f"{'scenario':<22} {'succ':>6} {'tracked_endpt_mm':>18} "
+        f"{'max_xtrack_mm':>16} {'collides':>10}"
+    )
+    print("\n" + header)
+    print("-" * len(header))
+    for scen in HAND_DESIGNED:
+        runs = grouped.get(scen.name, [])
+        ok = [r for r in runs if _success(r)]
+        rate = f"{len(ok)}/{len(runs)}"
+        ep = _mean_std([_to_float(r, "tracked_endpoint_error_mm") for r in ok])
+        ct = _mean_std([_to_float(r, "tracked_max_crosstrack_mm") for r in ok])
+        print(
+            f"{scen.name:<22} {rate:>6} {_fnum(*ep, width=14, prec=1)} "
+            f"{_fnum(*ct, width=12, prec=1)} {_collide_rate(runs):>10}"
+        )
+
+    ok = [r for r in rand if _success(r)]
+    ep = _mean_std([_to_float(r, "tracked_endpoint_error_mm") for r in ok])
+    ct = _mean_std([_to_float(r, "tracked_max_crosstrack_mm") for r in ok])
+    print(
+        f"{'random (aggregate)':<22} {f'{len(ok)}/{len(rand)}':>6} "
+        f"{_fnum(*ep, width=14, prec=1)} {_fnum(*ct, width=12, prec=1)} "
+        f"{_collide_rate(rand):>10}"
+    )
+
+
 def report_random(rows):
     print()
     print("=" * 78)
@@ -160,8 +221,13 @@ def main():
     rows = load_rows(csv_path)
     print(f"Read {len(rows)} raw records from {csv_path}\n")
     report_hand_designed(rows)
+    report_vanilla_tracked(rows)
     report_random(rows)
     print("\n(cost/time/iters/endpt/hdisc are mean +- std over SUCCESSFUL runs)")
+    print(
+        "(endpt_mm is empty for VanillaRRT by design -- see the VANILLA TRACKED "
+        "EXECUTION table for its three tracker metrics)"
+    )
 
 
 if __name__ == "__main__":

@@ -57,13 +57,14 @@ from plot_benchmark_figures import (  # noqa: E402
     C_OBSTACLE,
     C_START,
     C_SURFACE,
-    C_VAN_EXEC,
     C_VAN_PLAN,
     _by_scen_planner,
+    _draw_vanilla_executed,
     executed_trace,
     median_seed,
     planned_polyline,
     success_rate,
+    vanilla_tracked,
 )
 
 from needlesim.benchmark.harness import (  # noqa: E402
@@ -254,24 +255,20 @@ def make_figure(scen_name, grouped):
     v_result, v_cfg, v_params = run_rrt(VanillaRRT, scenario, v_seed)
     px, py = zip(*planned_polyline(v_result))
     ax.plot(px, py, color=C_VAN_PLAN, linewidth=1.6, label="Vanilla planned", zorder=4)
-    ex, ey = zip(*executed_trace(v_result, scenario, v_cfg, v_params))
-    ax.plot(
-        ex,
-        ey,
-        color=C_VAN_EXEC,
-        linewidth=1.8,
-        linestyle=(0, (5, 2)),
-        label="Vanilla executed",
-        zorder=5,
-    )
-    v_ep = endpoint_error_mm(v_result, scenario.start, scenario.goal, v_cfg, v_params)
+    # Executed curve = open-loop TRACKED trajectory (vanilla_tracker.py), the
+    # same treatment as the primary figures -- not the raw-controls circle.
+    v_tracked = vanilla_tracked(v_result, scenario, v_cfg, v_params, env)
+    _draw_vanilla_executed(ax, v_tracked)
     v_cost = path_cost_mm(v_result, v_cfg)
     v_hd, _, v_hn = heading_discontinuity(v_result, v_cfg, v_params)
     seeds_note = f"seeds: vanilla={v_seed}"
+    collide_note = "COLLIDES" if v_tracked.collides else "no collision"
     subtitle_parts.append(
-        f"Vanilla (seed {v_seed}): {v_cost:.0f} mm, executed {v_ep:.0f} mm off, "
-        f"hdisc {v_hd:.2f} rad @ {v_hn} nodes"
+        f"Vanilla (seed {v_seed}): {v_cost:.0f} mm, tracked "
+        f"{v_tracked.endpoint_error_mm:.0f} mm off, x-track "
+        f"{v_tracked.max_crosstrack_mm:.0f} mm — {collide_note}"
     )
+    subtitle_parts.append(f"    hdisc {v_hd:.2f} rad @ {v_hn} nodes (planned path)")
 
     # --- Kinodynamic: one smooth curve (planned == executed). 10/10 at scale --
     k_seed = median_seed(grouped, scen_name, "KinodynamicRRT")
@@ -338,7 +335,7 @@ def make_figure(scen_name, grouped):
     )
     legend_loc = "upper left" if scen_name == "cluttered" else "upper right"
     _finish(ax, scenario, title, "\n".join(subtitle_parts), legend_loc=legend_loc)
-    fig.tight_layout(rect=(0, 0.06, 1, 1))
+    fig.tight_layout(rect=(0, 0.11, 1, 1))
     out = OUT_DIR / f"benchmark_scaled_{scen_name}.png"
     fig.savefig(out, dpi=150)
     plt.close(fig)

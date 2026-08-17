@@ -47,6 +47,7 @@ from needlesim.benchmark.harness import (  # noqa: E402
     make_config,
 )
 from needlesim.benchmark.scenarios import SCENARIOS, build_env  # noqa: E402
+from needlesim.benchmark.vanilla_tracker import track_path  # noqa: E402
 from needlesim.models.unicycle_needle import (  # noqa: E402
     NeedleParams,
     State,
@@ -128,10 +129,29 @@ def planned_polyline(result):
 
 def executed_trace(result, scenario, cfg, params):
     """Roll the returned controls through the real model from the start -- where
-    the needle actually goes if you execute this plan."""
+    the needle actually goes if you execute this plan. Used for Kino/RRTStar,
+    whose stored controls ARE model-generated (planned == executed)."""
     steps = _expand_controls(result.controls, cfg.n_steps_per_extend)
     trace = rollout(scenario.start, steps, cfg.step_dt, params)
     return [(s.x, s.y) for s in trace]
+
+
+def vanilla_tracked(result, scenario, cfg, params, env):
+    """VanillaRRT's executed curve is the OPEN-LOOP TRACKED trajectory -- its
+    path read as a reference polyline and followed with feasible curved
+    controls (see benchmark/vanilla_tracker.py) -- NOT its raw stored controls,
+    which just drive a radius-1/kappa circle. Returns the TrackedRun so the
+    figure can also mark where it strays into an obstacle."""
+    return track_path(
+        result.path,
+        scenario.start,
+        scenario.goal,
+        cfg.edge_velocity,
+        cfg.step_dt,
+        env,
+        params,
+        cfg.margin,
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -179,6 +199,39 @@ def _draw_pose(ax, pose: State, color, label, marker):
         length_includes_head=True,
         zorder=6,
     )
+
+
+def _draw_vanilla_executed(ax, tracked):
+    """Draw the tracked (executed) trajectory and, if it collides, mark the
+    first colliding state with a bold X and redraw the post-collision tail as a
+    solid line -- so `tracked_collides` (the headline) is readable at a glance."""
+    ex = [s.x for s in tracked.trace]
+    ey = [s.y for s in tracked.trace]
+    ax.plot(
+        ex,
+        ey,
+        color=C_VAN_EXEC,
+        linewidth=1.8,
+        linestyle=(0, (5, 2)),
+        label="Vanilla executed",
+        zorder=5,
+    )
+    if tracked.collides:
+        ci = tracked.first_collision_index
+        # Post-collision tail solid: the needle is already inside tissue here.
+        ax.plot(ex[ci:], ey[ci:], color=C_VAN_EXEC, linewidth=1.8, zorder=5)
+        ax.plot(
+            ex[ci],
+            ey[ci],
+            marker="X",
+            color=C_VAN_EXEC,
+            markersize=13,
+            markeredgecolor="black",
+            markeredgewidth=0.9,
+            linestyle="none",
+            label="Vanilla collision",
+            zorder=7,
+        )
 
 
 def _draw_tree(ax, result):
@@ -242,23 +295,17 @@ def make_figure(scen_name, grouped):
     v_result, v_cfg, v_params = run(VanillaRRT, scenario, v_seed)
     px, py = zip(*planned_polyline(v_result))
     ax.plot(px, py, color=C_VAN_PLAN, linewidth=1.6, label="Vanilla planned", zorder=4)
-    ex, ey = zip(*executed_trace(v_result, scenario, v_cfg, v_params))
-    ax.plot(
-        ex,
-        ey,
-        color=C_VAN_EXEC,
-        linewidth=1.8,
-        linestyle=(0, (5, 2)),
-        label="Vanilla executed",
-        zorder=5,
-    )
-    v_ep = endpoint_error_mm(v_result, scenario.start, scenario.goal, v_cfg, v_params)
+    v_tracked = vanilla_tracked(v_result, scenario, v_cfg, v_params, env)
+    _draw_vanilla_executed(ax, v_tracked)
     v_hd, _, v_hn = heading_discontinuity(v_result, v_cfg, v_params)
 
     seeds_note = f"seeds: vanilla={v_seed}"
+    collide_note = "COLLIDES" if v_tracked.collides else "no collision"
     subtitle_parts = [
-        f"Vanilla (seed {v_seed}): executed lands {v_ep:.0f} mm off; "
-        f"heading disc max {v_hd:.2f} rad at {v_hn} nodes"
+        f"Vanilla (seed {v_seed}): tracked lands "
+        f"{v_tracked.endpoint_error_mm:.0f} mm off, max cross-track "
+        f"{v_tracked.max_crosstrack_mm:.0f} mm — {collide_note}",
+        f"    heading disc max {v_hd:.2f} rad at {v_hn} nodes (planned path)",
     ]
 
     # --- Kinodynamic: one smooth curve (planned == executed), or a failed tree
@@ -309,7 +356,7 @@ def make_figure(scen_name, grouped):
     # moves, to avoid occluding the goal where it sits top-right (cluttered).
     legend_loc = "upper left" if scen_name == "cluttered" else "upper right"
     _finish(ax, scenario, title, "\n".join(subtitle_parts), legend_loc=legend_loc)
-    fig.tight_layout(rect=(0, 0.04, 1, 1))
+    fig.tight_layout(rect=(0, 0.08, 1, 1))
     out = OUT_DIR / f"benchmark_{scen_name}.png"
     fig.savefig(out, dpi=150)
     plt.close(fig)
