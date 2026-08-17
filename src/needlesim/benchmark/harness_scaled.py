@@ -56,6 +56,7 @@ from needlesim.benchmark.scaled_scenarios import (
     SCALE,
 )
 from needlesim.benchmark.scenarios import build_env
+from needlesim.benchmark.vanilla_tracker import track_path
 from needlesim.models.unicycle_needle import NeedleParams, State, rollout_variable
 from needlesim.planning.rrt import KinodynamicRRT, RRTConfig, VanillaRRT
 from needlesim.planning.rrt_star import RRTStar, RRTStarConfig
@@ -183,6 +184,9 @@ def run_one(scenario, planner_name: str, seed: int) -> RunRecord:
             **base,
             path_cost_mm=None,
             endpoint_error_mm=None,
+            tracked_endpoint_error_mm=None,
+            tracked_max_crosstrack_mm=None,
+            tracked_collides=None,
             heading_disc_max_rad=None,
             heading_disc_mean_rad=None,
             heading_disc_count=None,
@@ -196,18 +200,43 @@ def run_one(scenario, planner_name: str, seed: int) -> RunRecord:
             endpoint_error_mm=rrtstar_endpoint_error_mm(
                 result, scenario.start, scenario.goal, params
             ),
+            tracked_endpoint_error_mm=None,
+            tracked_max_crosstrack_mm=None,
+            tracked_collides=None,
             heading_disc_max_rad=hmax,
             heading_disc_mean_rad=hmean,
             heading_disc_count=hcount,
         )
 
+    # VanillaRRT gets the open-loop tracker (see vanilla_tracker.py);
+    # KinodynamicRRT keeps endpoint_error_mm (its controls are model-generated).
+    endpoint = None
+    t_ep = t_ct = t_col = None
+    if planner_name == "VanillaRRT":
+        tracked = track_path(
+            result.path,
+            scenario.start,
+            scenario.goal,
+            cfg.edge_velocity,
+            cfg.step_dt,
+            env,
+            params,
+            cfg.margin,
+        )
+        t_ep = tracked.endpoint_error_mm
+        t_ct = tracked.max_crosstrack_mm
+        t_col = tracked.collides
+    else:
+        endpoint = endpoint_error_mm(result, scenario.start, scenario.goal, cfg, params)
+
     hmax, hmean, hcount = heading_discontinuity(result, cfg, params)
     return RunRecord(
         **base,
         path_cost_mm=path_cost_mm(result, cfg),
-        endpoint_error_mm=endpoint_error_mm(
-            result, scenario.start, scenario.goal, cfg, params
-        ),
+        endpoint_error_mm=endpoint,
+        tracked_endpoint_error_mm=t_ep,
+        tracked_max_crosstrack_mm=t_ct,
+        tracked_collides=t_col,
         heading_disc_max_rad=hmax,
         heading_disc_mean_rad=hmean,
         heading_disc_count=hcount,

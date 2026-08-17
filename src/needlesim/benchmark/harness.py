@@ -37,6 +37,7 @@ from pathlib import Path
 
 from needlesim.benchmark.random_scenarios import load_scenarios
 from needlesim.benchmark.scenarios import COMMON_CONDITIONS, HAND_DESIGNED, build_env
+from needlesim.benchmark.vanilla_tracker import track_path
 from needlesim.models.unicycle_needle import NeedleParams, State, rollout
 from needlesim.planning.rrt import KinodynamicRRT, RRTConfig, VanillaRRT
 
@@ -65,6 +66,14 @@ CSV_COLUMNS = [
     "wall_time_s",
     "path_cost_mm",
     "endpoint_error_mm",
+    # VanillaRRT-only execution metrics (open-loop segment-following tracker,
+    # see vanilla_tracker.py). Empty for Kino/RRTStar, which report
+    # endpoint_error_mm instead. endpoint_error_mm is conversely empty for
+    # VanillaRRT -- its raw-controls value measured a storage convention, not
+    # path quality, and is dropped rather than kept alongside these.
+    "tracked_endpoint_error_mm",
+    "tracked_max_crosstrack_mm",
+    "tracked_collides",
     "heading_disc_max_rad",
     "heading_disc_mean_rad",
     "heading_disc_count",
@@ -86,6 +95,9 @@ class RunRecord:
     wall_time_s: float
     path_cost_mm: float | None
     endpoint_error_mm: float | None
+    tracked_endpoint_error_mm: float | None
+    tracked_max_crosstrack_mm: float | None
+    tracked_collides: bool | None
     heading_disc_max_rad: float | None
     heading_disc_mean_rad: float | None
     heading_disc_count: int | None
@@ -216,17 +228,44 @@ def run_one(scenario, kind: str, planner_name: str, seed: int) -> RunRecord:
             **base,
             path_cost_mm=None,
             endpoint_error_mm=None,
+            tracked_endpoint_error_mm=None,
+            tracked_max_crosstrack_mm=None,
+            tracked_collides=None,
             heading_disc_max_rad=None,
             heading_disc_mean_rad=None,
             heading_disc_count=None,
         )
+
+    # VanillaRRT reports the three tracker metrics (its raw-controls
+    # endpoint_error is meaningless -- see vanilla_tracker.py); Kino reports
+    # endpoint_error_mm, whose controls ARE the model's so it lands on target.
+    endpoint = None
+    t_ep = t_ct = t_col = None
+    if planner_name == "VanillaRRT":
+        tracked = track_path(
+            result.path,
+            scenario.start,
+            scenario.goal,
+            cfg.edge_velocity,
+            cfg.step_dt,
+            env,
+            params,
+            cfg.margin,
+        )
+        t_ep = tracked.endpoint_error_mm
+        t_ct = tracked.max_crosstrack_mm
+        t_col = tracked.collides
+    else:
+        endpoint = endpoint_error_mm(result, scenario.start, scenario.goal, cfg, params)
+
     hmax, hmean, hcount = heading_discontinuity(result, cfg, params)
     return RunRecord(
         **base,
         path_cost_mm=path_cost_mm(result, cfg),
-        endpoint_error_mm=endpoint_error_mm(
-            result, scenario.start, scenario.goal, cfg, params
-        ),
+        endpoint_error_mm=endpoint,
+        tracked_endpoint_error_mm=t_ep,
+        tracked_max_crosstrack_mm=t_ct,
+        tracked_collides=t_col,
         heading_disc_max_rad=hmax,
         heading_disc_mean_rad=hmean,
         heading_disc_count=hcount,
