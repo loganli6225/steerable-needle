@@ -228,6 +228,43 @@ constrained) and loses some scenarios to the curvature constraint, and buys
 feasibility — continuous, executable-as-generated, on-target, and (surprisingly)
 shorter paths.
 
+### Vanilla's path is not merely infeasible — it is not even *informative*
+
+There is a sharper statement hiding in *why* the tracked trajectory looks like a
+near-straight line with slight bows rather than anything resembling the plan.
+Vanilla's edges are **5mm long** (`v·dt·n = 5.0 · 0.05 · 20`), and 5mm of arc at
+R = 50mm is only **5.7° of turn**. Because vanilla's path zigzags — each
+segment's bearing differs from the last, and the sign of the required turn flips
+constantly — the tracker emits **alternating short ±5.7° arcs**: b = +1, then −1,
+then +1. That is *precisely the duty-cycle pattern* from the Task 1 test
+(alternating ±b → κ_eff ≈ 0), so the net heading change is ≈ 0 and the executed
+path stays roughly straight. Measured on the real paths: **14–27 sign flips**
+per path (roughly every other segment), a **longest same-sign run of only 2–5
+edges**, net heading change over the whole path of 0–58° (mostly < 30°), and an
+executed trace that bows only **2–16% of its start→end chord**. It is
+duty-cycling *by accident*.
+
+The two exclusion reasons compound. The corners demand large heading changes
+(reason 1: geometric infeasibility, the 27–37 discontinuities), and the segment
+structure *prevents accumulating* them (reason 2: a 90° corner needs ~16
+consecutive same-sign 5.7° edges, but the bearing has already flipped by
+edge 3–5, giving back what little was gained). So even with **every `b` sign
+chosen exactly right**, the tracker recovers a nearly straight path — no run of
+same-sign steps is ever long enough to matter.
+
+That is a stronger claim than "the tracker does poorly." It says vanilla's path
+contains **almost no recoverable steering information** at this segment length
+and turning radius. This closes a loop back to the planner's own design note
+(`docs/roadmap.md`, Task 3): vanilla's steering lives *entirely* in the per-node
+headings it synthesises and then discards. The tracker tries to recover that
+information from node *positions*, and the geometry forbids it — the positions
+are too closely spaced relative to the turning radius for the bearing changes
+between them to be executable. Vanilla's path is therefore not just unexecutable;
+it is uninformative — the needle cannot extract executable steering from it at
+realistic curvature. (The edge geometry — 5mm, 5.7°/edge — is fixed by the
+harness config; the sign-flip and same-sign-run counts are measured directly
+from the tracked hand-designed paths.)
+
 ---
 
 ## Honesty notes / limitations

@@ -38,6 +38,17 @@ land 1.8–2.3mm from target, and are also *shorter* (114 vs 138mm on `open`).
 Vanilla's sole genuine advantage is wall-clock, bought with paths that are
 longer, discontinuous, and unexecutable by a continuous vehicle.
 
+A sharper form of the same point: vanilla's path is not merely infeasible, it is
+not even *informative*. Its 5mm edges are 5.7° of turn at R=50mm, and the
+zigzag flips the required turn sign every 2–5 edges — so an open-loop follower
+duty-cycles ±5.7° *by accident* (κ_eff ≈ 0) and traces a near-straight line
+regardless of how the b-signs are chosen; a 90° corner would need ~16 consecutive
+same-sign edges and no run is ever that long. The tracker tries to recover
+vanilla's steering from node *positions* and the geometry forbids it: at this
+segment length and turning radius, the executable steering information simply
+isn't in the path (full derivation and measured numbers in
+`docs/benchmark_results.md`).
+
 (An earlier version of this write-up cited a 133–231mm vanilla "endpoint error."
 That number rolled vanilla's *raw stored controls* — one `Control(v, b=+1)` per
 edge — which just trace a radius-1/κ circle, so it measured a storage convention,

@@ -414,6 +414,18 @@ of decisions made in earlier phases; do not quietly drop them.
   this generator seed). No true-vs-model mismatch is introduced yet; Vanilla's
   tracked collisions are purely its point-robot planning cheat. That mismatch
   axis is Phase 3.
+
+  Sharper finding from the tracker (worth keeping): vanilla's path is not merely
+  infeasible, it is not even INFORMATIVE. Its 5mm edges are 5.7° of turn at
+  R=50mm and the zigzag flips the required-turn sign every 2–5 edges, so an
+  open-loop follower duty-cycles ±5.7° by accident (κ_eff ≈ 0) and traces a
+  near-straight line no matter how the b-signs are chosen — a 90° corner needs
+  ~16 consecutive same-sign edges and no run is ever that long. So the tracker's
+  sign decisions are almost irrelevant: at this segment length / turning radius
+  the executable steering information simply isn't recoverable from node
+  positions, which is the geometric flip-side of the Task 3 note that vanilla's
+  steering lives entirely in the per-node headings it synthesises and discards.
+  Derivation + measured numbers in `docs/benchmark_results.md`.
 - **Secondary benchmark (all three planners at enlarged scale): complete — and
   it FALSIFIES the strong hypothesis it was built to test.** Full numbers,
   calibration, and figures-of-the-argument live in
