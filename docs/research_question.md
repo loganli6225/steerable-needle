@@ -26,13 +26,25 @@ anatomical scale, 840 runs) and `docs/benchmark_scaled_results.md` (secondary,
 
 **VanillaRRT vs KinodynamicRRT — the trade is feasibility, not merely
 optimality.** Vanilla is 100% successful and ~30× faster, but its paths carry
-27–37 heading discontinuities each and, executed under real curvature, land
-133–231mm from target in a 150mm workspace — on `cluttered`, past the workspace
-diagonal. Kinodynamic is slower and sometimes fails, but its paths are
-continuous (heading discontinuity exactly 0.000 across all 325 successful runs),
+27–37 heading discontinuities each, and even under the *most charitable*
+feasible execution — an open-loop tracker that reinterprets the planned path as
+followable curved controls (`benchmark/vanilla_tracker.py`; vanilla-only, since
+the other planners' controls are already model-generated and exact) — they
+**collide with a critical structure in 24/30 to 30/30 runs** (91% across the
+random set) and stray 40–101mm from their own planned polyline. Kinodynamic is
+slower and sometimes fails, but its paths are continuous (heading discontinuity
+exactly 0.000 across all 325 successful runs), are executable as generated,
 land 1.8–2.3mm from target, and are also *shorter* (114 vs 138mm on `open`).
 Vanilla's sole genuine advantage is wall-clock, bought with paths that are
 longer, discontinuous, and unexecutable by a continuous vehicle.
+
+(An earlier version of this write-up cited a 133–231mm vanilla "endpoint error."
+That number rolled vanilla's *raw stored controls* — one `Control(v, b=+1)` per
+edge — which just trace a radius-1/κ circle, so it measured a storage convention,
+not path quality. It was replaced on 2026-08-16 by the tracker metrics above,
+which give vanilla's path the fairest feasible reading; the endpoint distances
+dropped substantially, but the argument never rested on them — it rests on
+`tracked_collides` and the heading discontinuities, both unaffected.)
 
 **RRTStar is excluded on three measured grounds, not omitted.**
 1. It cannot connect at anatomical scale — 155 nodes in 10,000 iterations

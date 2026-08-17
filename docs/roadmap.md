@@ -389,18 +389,31 @@ of decisions made in earlier phases; do not quietly drop them.
   `plot_benchmark_figures.py` → `docs/figures/benchmark_*.png` (tracked; the
   near-median-cost representative seed per cell).
 
+  VanillaRRT's execution metric was REVISED 2026-08-16 (`benchmark/
+  vanilla_tracker.py`): its raw stored controls (one `Control(v,b=+1)`/edge)
+  just trace a radius-1/κ circle, so the old `endpoint_error_mm` (133–230mm)
+  measured a storage convention, not path quality. It is replaced, vanilla-only,
+  by an open-loop segment-following tracker that reads the planned path as a
+  reference polyline and derives feasible curved controls — giving
+  tracked_endpoint, max_crosstrack, and (the headline) tracked_collides.
+  Kino/RRT\* are untouched: their controls are model-generated, so their
+  planned==executed and endpoint_error_mm is already exact. The benchmarks were
+  fully re-run; every non-vanilla-execution column reproduced EXACTLY (success,
+  cost, iters, heading disc, kino/RRT\* endpoint_error all byte-identical).
+
   **The result — feasibility, not just optimality.** VanillaRRT is fast
   (~0.05s) but its paths are DISCONTINUOUS (heading disc order-1 rad at 27–37
-  nodes) and, executed on the real needle, land 133–230mm off in a 150mm
-  workspace — they leave the arena, diverging from step one, which the figures
-  show directly. KinodynamicRRT is ~35–50× slower and loses some scenarios to
-  the curvature constraint, but its paths are continuous (heading disc
-  **exactly 0.000** across all 325 successful runs), land 1.8–2.3mm off, and
-  are actually SHORTER. Random set: both 26/30, vanilla-only 4/30, kino-only 0,
-  neither 0 (the last is seed-specific — Vanilla solved all 30, so the
-  unsolvable tail did not appear at this generator seed). No true-vs-model
-  mismatch is introduced yet; Vanilla's endpoint error is purely its
-  point-robot planning cheat. That mismatch axis is Phase 3.
+  nodes) and, even under the tracker's most charitable feasible execution,
+  COLLIDE with a critical structure in 24/30–30/30 runs (91% of the random set)
+  while straying 40–101mm from their own planned polyline. KinodynamicRRT is
+  ~35–50× slower and loses some scenarios to the curvature constraint, but its
+  paths are continuous (heading disc **exactly 0.000** across all 325 successful
+  runs), executable as generated, land 1.8–2.3mm off, and are actually SHORTER.
+  Random set: both 26/30, vanilla-only 4/30, kino-only 0, neither 0 (the last is
+  seed-specific — Vanilla solved all 30, so the unsolvable tail did not appear at
+  this generator seed). No true-vs-model mismatch is introduced yet; Vanilla's
+  tracked collisions are purely its point-robot planning cheat. That mismatch
+  axis is Phase 3.
 - **Secondary benchmark (all three planners at enlarged scale): complete — and
   it FALSIFIES the strong hypothesis it was built to test.** Full numbers,
   calibration, and figures-of-the-argument live in

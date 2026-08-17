@@ -131,23 +131,35 @@ equal-compute comparison themselves and stays reproducible across machines.
 ### Results (120 runs, `experiments/results/benchmark_scaled_raw.csv`)
 
 Mean ± std over **successful** runs. `endpt_mm` = distance from goal when the
-returned controls are executed on the real needle; `hdisc` = max heading
-discontinuity at interior nodes (the feasibility measure).
+returned controls are executed on the real needle (Kino / RRT\* only; their
+controls are model-generated). `hdisc` = max heading discontinuity at interior
+nodes (the feasibility measure). VanillaRRT's raw-controls endpoint is
+meaningless (a radius-1/κ circle — see `docs/benchmark_results.md`), so vanilla's
+execution is measured by the open-loop tracker in the separate table below.
 
 | scenario | planner | succ | cost_mm | time_s | endpt_mm | hdisc_max |
 |---|---|---|---|---|---|---|
-| open | Vanilla | 10/10 | 460 ± 31 | 0.14 | **368 ± 28** | **1.70** |
-| open | Kinodynamic | 10/10 | 413 ± 33 | 3.3 | 8.1 ± 1.4 | 0.000 |
-| open | RRTStar | 9/10 | **2242 ± 585** | 133 | 1.3 ± 2.6 | 0.000 |
-| constrained_passage | Vanilla | 10/10 | 486 ± 30 | 0.23 | **430 ± 19** | **1.61** |
-| constrained_passage | Kinodynamic | 10/10 | 430 ± 55 | 2.9 | 8.2 ± 1.3 | 0.000 |
-| constrained_passage | RRTStar | **2/10** | **2871 ± 470** | 133 | 8.6 ± 1.5 | 0.000 |
-| target_behind | Vanilla | 10/10 | 490 ± 20 | 0.15 | **404 ± 15** | **1.64** |
-| target_behind | Kinodynamic | **10/10** | 520 ± 44 | 0.56 | 8.2 ± 1.2 | 0.000 |
-| target_behind | RRTStar | **5/10** | **3132 ± 884** | 148 | 3.2 ± 4.4 | 0.000 |
-| cluttered | Vanilla | 10/10 | 622 ± 36 | 0.24 | **498 ± 28** | **1.71** |
-| cluttered | Kinodynamic | **10/10** | 620 ± 69 | 0.86 | 7.8 ± 1.5 | 0.000 |
+| open | Vanilla | 10/10 | 460 ± 31 | 0.16 | — † | **1.70** |
+| open | Kinodynamic | 10/10 | 413 ± 33 | 3.4 | 8.1 ± 1.4 | 0.000 |
+| open | RRTStar | 9/10 | **2242 ± 585** | 137 | 1.3 ± 2.6 | 0.000 |
+| constrained_passage | Vanilla | 10/10 | 486 ± 30 | 0.24 | — † | **1.61** |
+| constrained_passage | Kinodynamic | 10/10 | 430 ± 55 | 3.0 | 8.2 ± 1.3 | 0.000 |
+| constrained_passage | RRTStar | **2/10** | **2871 ± 470** | 150 | 8.6 ± 1.5 | 0.000 |
+| target_behind | Vanilla | 10/10 | 490 ± 20 | 0.16 | — † | **1.64** |
+| target_behind | Kinodynamic | **10/10** | 520 ± 44 | 0.60 | 8.2 ± 1.2 | 0.000 |
+| target_behind | RRTStar | **5/10** | **3132 ± 884** | 154 | 3.2 ± 4.4 | 0.000 |
+| cluttered | Vanilla | 10/10 | 622 ± 36 | 0.24 | — † | **1.71** |
+| cluttered | Kinodynamic | **10/10** | 620 ± 69 | 0.87 | 7.8 ± 1.5 | 0.000 |
 | cluttered | RRTStar | **0/10** | — | — | — | — |
+
+† **VanillaRRT tracked execution** (open-loop segment following; vanilla only):
+
+| scenario | tracked_endpoint_mm | max_crosstrack_mm | **collides** |
+|---|---|---|---|
+| open | 140 ± 53 | 142 ± 47 | **6/10** |
+| constrained_passage | 188 ± 95 | 194 ± 91 | **10/10** |
+| target_behind | 156 ± 62 | 160 ± 60 | **10/10** |
+| cluttered | 345 ± 161 | 318 ± 129 | **10/10** |
 
 ### Headline: RRT* vs Kinodynamic path cost, where BOTH succeed
 
@@ -191,10 +203,15 @@ unreliably (148s, 5/10).
 ### Vanilla, unchanged: fast, "successful," geometrically infeasible
 
 Vanilla is 10/10 planning-successes everywhere at ~0.2s, but every path is a
-point-robot fiction: executed on the real needle it lands **368–498mm off in a
-500mm workspace** (it leaves the arena) with **order-1-radian heading
-discontinuities** at every node. This is the same finding as the primary
-benchmark, and the enlarged endpoint errors make it starker.
+point-robot fiction with **order-1-radian heading discontinuities at every
+node**. Under the open-loop tracker (the fairest feasible execution — same
+treatment as the primary benchmark), its path strays 142–318mm from its own
+planned polyline and **collides in 10/10 runs on the three harder scenarios**
+(6/10 on the permissive `open`, where the enlarged corridors leave just enough
+room for the corner-cutting trajectory to sometimes stay clear). This is the
+same finding as the primary benchmark: vanilla's plans are unexecutable, and
+enlarging the workspace does not change that — it only enlarges the distances
+over which the tracked path strays before it hits something.
 
 ---
 

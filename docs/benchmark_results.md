@@ -7,11 +7,30 @@ file is the *results*.
 
 > **One-line claim.** At realistic bevel-tip curvature (R = 1/κ = 50mm) in a
 > 150mm workspace, VanillaRRT is faster but its paths are geometrically
-> infeasible — discontinuous at every node, and if executed they leave the
-> workspace 130–230mm from target — whereas KinodynamicRRT is slower and
-> sometimes fails, but produces continuous paths (heading discontinuity
-> **exactly 0.000** across all 325 successful runs) that land 1.8–2.3mm from
+> infeasible — discontinuous at every node (heading discontinuity order-1 rad
+> at 27–37 nodes), and even under the *most charitable* feasible execution — an
+> open-loop tracker that reinterprets the path as curved controls — they
+> **collide with a critical structure in 24/30 to 30/30 runs** and stray 40–101mm
+> from the planned polyline. KinodynamicRRT is slower and sometimes fails, but
+> produces continuous paths (heading discontinuity **exactly 0.000** across all
+> 325 successful runs) that are executable as generated and land 1.8–2.3mm from
 > target.
+
+> **Why the vanilla execution metric changed (2026-08-16).** Vanilla's edges
+> store one `Control(v, b=+1)` each — all of its steering lives in per-node
+> headings it synthesises and discards — so rolling the *raw stored controls*
+> just drove a radius-1/κ circle, and the old `endpoint_error_mm` (130–230mm)
+> measured where that circle happened to end: a **storage convention, not path
+> quality**. It is now replaced, *for VanillaRRT only*, by an open-loop
+> segment-following tracker (`benchmark/vanilla_tracker.py`) that reads the
+> planned path as a reference polyline and derives feasible curved controls from
+> its segment bearings — the fairest reading of what vanilla output. Kinodynamic
+> and RRT\* are untouched: their controls are model-generated, so planned and
+> executed coincide and `endpoint_error_mm` is already exact (re-deriving *their*
+> controls from bearings would manufacture error and degrade an exact metric).
+> The endpoint numbers improved substantially under the fairer metric; the
+> argument does not rest on that magnitude — it rests on `tracked_collides` and
+> the heading discontinuities, neither of which is affected.
 
 ---
 
@@ -42,12 +61,25 @@ why wall-clock is reported as its own metric, not inferred from iterations.
 **Metrics** (all rolled through the one real model, κ = 1/50 — "execute this
 plan on the needle"):
 - **path_cost_mm** — executed path length (`n_edges · n_steps · v · dt`).
-- **endpoint_error_mm** — roll the returned controls from the start; distance
-  of the final pose from goal. The "if you executed this plan, where does the
-  needle end up?" number.
+- **endpoint_error_mm** *(Kino / RRT\* only)* — roll the returned controls from
+  the start; distance of the final pose from goal. Because their controls are
+  model-generated, this is where the needle actually ends up if you execute the
+  plan.
+- **VanillaRRT tracked-execution metrics** *(vanilla only)* — the raw stored
+  controls are meaningless (see the note above), so vanilla is executed via the
+  open-loop tracker instead, giving three numbers:
+  - **tracked_endpoint_error_mm** — distance from the tracked trajectory's final
+    state to goal.
+  - **tracked_max_crosstrack_mm** — max distance from any executed state to the
+    reference *polyline* (min over segments, not to nearest node).
+  - **tracked_collides** — does any executed state violate `is_free(margin)`
+    (including leaving the workspace)? **The headline** — a path that cannot be
+    followed without hitting a critical structure is unusable regardless of
+    where it ends up.
 - **heading discontinuity** (max / mean / count > 1e-6 rad) — per interior
   node, the wrapped gap between the re-rolled arrival heading and the stored
-  departure heading. The measure of geometric infeasibility.
+  departure heading. The measure of geometric infeasibility. Unaffected by the
+  execution-metric change — it is a property of the *planned* path.
 
 Reported hand-designed and random **separately**: the four are illustrative
 (each gets a figure), the 30 are statistical (aggregate only). Mixing them
@@ -62,14 +94,32 @@ Raw per-run records: `experiments/results/benchmark_raw.csv` (regenerable via
 
 | scenario | planner | success | cost_mm | time_s | iters | endpoint_mm | hdisc_max | hdisc_n |
 |---|---|---|---|---|---|---|---|---|
-| **open** | Vanilla | 30/30 | 138.3 ± 11.3 | 0.04 | 125 | **132.7 ± 9.9** | **1.51** | 26.7 |
-| | Kino | 30/30 | 114.0 ± 3.6 | 1.54 | 2370 | **2.08 ± 0.6** | **0.000** | 0 |
-| **constrained_passage** | Vanilla | 30/30 | 151.3 | 0.07 | 282 | **168.7** | 1.61 | 29.3 |
-| | Kino | **19/30** | 121.1 | 3.26 | 6005 | 2.33 | 0.000 | 0 |
-| **target_behind** | Vanilla | 30/30 | 158.8 | 0.05 | 164 | **151.1** | 1.61 | 30.8 |
+| **open** | Vanilla | 30/30 | 138.3 ± 11.3 | 0.04 | 125 | — † | **1.51** | 26.7 |
+| | Kino | 30/30 | 114.0 ± 3.6 | 1.57 | 2370 | **2.08 ± 0.6** | **0.000** | 0 |
+| **constrained_passage** | Vanilla | 30/30 | 151.3 | 0.08 | 282 | — † | 1.61 | 29.3 |
+| | Kino | **19/30** | 121.1 | 3.39 | 6005 | 2.33 | 0.000 | 0 |
+| **target_behind** | Vanilla | 30/30 | 158.8 | 0.06 | 164 | — † | 1.61 | 30.8 |
 | | Kino | **0/30** | — | — | — | — | — | — |
-| **cluttered** | Vanilla | 30/30 | 190.3 | 0.07 | 219 | **230.2 ± 1.6** | 1.61 | 37.1 |
-| | Kino | 29/30 | 177.9 | 2.35 | 4988 | 1.82 | 0.000 | 0 |
+| **cluttered** | Vanilla | 30/30 | 190.3 | 0.07 | 219 | — † | 1.61 | 37.1 |
+| | Kino | 29/30 | 177.9 | 2.67 | 4988 | 1.82 | 0.000 | 0 |
+
+† Vanilla's raw-controls `endpoint_error_mm` is dropped as meaningless; its
+execution is measured by the tracker table below.
+
+### VanillaRRT tracked execution (open-loop segment following, vanilla only)
+
+| scenario | success | tracked_endpoint_mm | max_crosstrack_mm | **collides** |
+|---|---|---|---|---|
+| **open** | 30/30 | 40.8 ± 12.7 | 40.2 ± 11.7 | **24/30** |
+| **constrained_passage** | 30/30 | 53.1 ± 17.8 | 53.4 ± 17.6 | **30/30** |
+| **target_behind** | 30/30 | 55.0 ± 16.1 | 55.2 ± 16.0 | **30/30** |
+| **cluttered** | 30/30 | 101.1 ± 35.7 | 95.7 ± 31.1 | **30/30** |
+
+Even given the most charitable feasible execution, vanilla's path drives into a
+critical structure (or off the workspace) in nearly every run — 24/30 on the
+permissive `open`, 30/30 on all three harder scenarios — and strays tens of mm
+from its own planned polyline en route. `collides` is the load-bearing number:
+these paths are unusable irrespective of endpoint.
 
 Each scenario tests something distinct:
 - **open** — efficiency baseline (both solve; the comparison is cost/quality,
@@ -93,8 +143,12 @@ design, not a degenerate measurement.
 
 | planner | success | cost_mm | time_s | iters | endpoint_mm | hdisc_max |
 |---|---|---|---|---|---|---|
-| Vanilla | 300/300 | 146.1 ± 18.0 | 0.05 | 158 | **138.3 ± 12.5** | 1.63 |
-| Kino | 247/300 | 112.1 ± 3.0 | 2.03 | 3562 | **1.87 ± 0.7** | 0.000 |
+| Vanilla | 300/300 | 146.1 ± 18.0 | 0.06 | 158 | — † | 1.63 |
+| Kino | 247/300 | 112.1 ± 3.0 | 2.33 | 3562 | **1.87 ± 0.7** | 0.000 |
+
+† Vanilla tracked execution (aggregate over 300 successful runs): tracked
+endpoint **44.1 ± 18.8mm**, max cross-track **43.8 ± 17.7mm**, **collides in
+272/300 (91%)**.
 
 **Solved-by-any-seed breakdown (30 scenarios):** both 26 (87%),
 vanilla-only 4 (13%), kino-only 0, **neither 0**.
@@ -113,22 +167,27 @@ discriminators.
 
 One figure per hand-designed scenario: geometry (obstacles + margin-inflated
 boundary + start/goal heading arrows + goal-tolerance circle), Vanilla's
-planned polyline, Vanilla's **executed** trace (its controls rolled through the
-real model, clipped at the workspace so the excursion shows), and Kino's single
-curve (planned = executed). Plotted runs are the **near-median-cost** seed per
-(scenario, planner) — representative, not cherry-picked: open v=1/k=0,
-constrained_passage v=19/k=0, target_behind v=7/(failed-tree seed 0),
-cluttered v=4/k=0. Regenerate with `scripts/plot_benchmark_figures.py`.
+planned polyline, Vanilla's **executed (open-loop tracked)** trajectory with the
+first colliding state marked by an ✗, and Kino's single curve (planned =
+executed). Plotted runs are the **near-median-cost** seed per (scenario, planner)
+— representative, not cherry-picked: open v=1/k=0, constrained_passage v=19/k=0,
+target_behind v=7/(failed-tree seed 0), cluttered v=4/k=0. Regenerate with
+`scripts/plot_benchmark_figures.py`.
 
 Four things the pictures show that the tables do not:
 
-1. **Vanilla's executed trajectory diverges immediately, not gradually.** In
-   all four figures the executed curve peels off within the first millimetres
-   and exits the *left* edge regardless of where the goal is — because
-   Vanilla's first control is b=1 and the planner discards its synthesised
-   per-node heading, so under real curvature the needle bends away on the very
-   first edge. The large endpoint errors are "wrong from step one," not "drifts
-   off near the end."
+1. **Vanilla's tracked trajectory follows the plan but cannot hold the corners,
+   and drives into tissue.** The tracked curve (red, dashed) loosely follows the
+   orange planned polyline — the tracker is doing its charitable best — but the
+   planned path carries 27–37 sharp heading discontinuities that a R=50mm needle
+   physically cannot make (a 90° turn needs ~78mm of travel), so it cuts every
+   corner and strays tens of mm. The ✗ marks where it first enters a critical
+   structure, and the four figures show four distinct failure shapes:
+   `target_behind` drives straight *through* the obstacle its plan detoured
+   around; `constrained_passage` drifts into the *wall* instead of threading the
+   16mm gap; `cluttered` plows into a vessel mid-weave; `open` (the one loose
+   enough to nearly work) leaves the arena at the top. This is the visual form of
+   `tracked_collides`.
 
 2. **`target_behind`'s failure has a visible shape.** The faint failed-Kino
    tree fans out **symmetrically around both sides** of the obstacle, sweeping
@@ -155,22 +214,34 @@ not merely too-tightly-curved — they are **discontinuous**, and therefore not
 executable by any continuous vehicle. The heading-discontinuity metric makes
 this quantitative and unambiguous: 0.000 for Kino everywhere (the stored node
 state *is* the rollout endpoint under the model that built it), order-1 radians
-at 27–37 nodes for Vanilla. Endpoint error then makes the *consequence*
-concrete: execute Vanilla's plan and the needle ends up outside the arena.
+at 27–37 nodes for Vanilla. The tracker then makes the *consequence* concrete
+under the most charitable feasible execution: even when the path is reinterpreted
+as followable curved controls, it **collides in 24/30–30/30 runs** (91% across
+the random set). The old raw-controls endpoint (130–230mm) is deliberately gone —
+it measured vanilla's storage convention, not its path; the argument now stands
+on `tracked_collides` and the heading discontinuities, and is *stronger* for not
+leaning on an inflated distance.
 
 The trade the benchmark quantifies: Kino pays ~35–50× in wall-clock (mean
-success time per scenario: 34× cluttered, 38× open, 41× random, 47×
+success time per scenario: ~34× cluttered, ~38× open, ~40× random, ~42×
 constrained) and loses some scenarios to the curvature constraint, and buys
-feasibility — continuous, on-target, and (surprisingly) shorter paths.
+feasibility — continuous, executable-as-generated, on-target, and (surprisingly)
+shorter paths.
 
 ---
 
 ## Honesty notes / limitations
 
 - **No true-vs-model mismatch yet.** All metrics use the *model* needle
-  (κ = 1/50). Vanilla's endpoint error is purely its planning cheat, not tissue
-  mismatch. The mismatch axis (a distinct `true_needle`) is Phase 3, and is
-  where the uncertainty-aware-planning sub-claim gets tested.
+  (κ = 1/50). Vanilla's tracked collisions are purely its point-robot planning
+  cheat (it plans as if it could turn arbitrarily, then cannot execute those
+  turns), not tissue mismatch. The mismatch axis (a distinct `true_needle`) is
+  Phase 3, and is where the uncertainty-aware-planning sub-claim gets tested.
+- **The vanilla tracker is open-loop by design.** It adds no sensing or
+  correction — it reads the planned path as an *intent* and executes it blind,
+  which is the fairest test of the path itself. A closed-loop pure-pursuit
+  tracker would be a test of a *controller's* skill, a different question, and is
+  deliberately not built.
 - **`neither` = 0 is seed-specific**, see the random-aggregate caveat above.
 - **RRT\* absence is a finding, not a gap** — but it means the benchmark
   compares two planners, not three, at this scale. The secondary
