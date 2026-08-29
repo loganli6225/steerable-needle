@@ -489,3 +489,65 @@ of decisions made in earlier phases; do not quietly drop them.
   kills the planner. The secondary experiment's turning-circle-floor finding
   STANDS, sharpened: the loops are the price of exact arbitrary-heading
   connection, not wasteful detours to cap away.
+- **Phase 3: EKF for tip-state estimation — complete (EKF only; see scope
+  note).** First phase where the `true_needle` vs `model_needle` split, kept
+  clean since Task 1, does real work: the simulator advances the needle with
+  TRUE kappa, the filter predicts with MODEL kappa, and the gap is the thing
+  measured. `NeedleEKF` in `src/needlesim/estimation/ekf.py` maintains a
+  Gaussian belief over (x, y, theta) with POSITION-ONLY, INTERMITTENT
+  measurements (imaging every 20 sim steps ≈ 1 Hz against a 20 Hz sim). Heading
+  is never observed; it is recovered through the position-heading covariance
+  correlation that `predict` builds up (verified nonzero in
+  `test_predict_builds_position_heading_correlation`, and that the Kalman gain's
+  bottom row acts on it in `test_update_corrects_heading_indirectly`). 13 tests
+  in `tests/test_ekf.py`, all green; 8-panel matched-vs-mismatch diagnostic via
+  `scripts/eyeball_ekf.py`.
+
+  Correctness rests on the Jacobian test, same strategy as the Dubins geometry:
+  the hand-derived analytic Jacobian is checked against finite differences of
+  the real `step`, not a reference solver we don't have. The Jacobian is the
+  Euler-form linearisation while `step` is RK4, so agreement is deliberately
+  APPROXIMATE — measured ~6e-4 across headings at v=5, kappa=1/50, dt=0.05,
+  which is the right order for a first-order approximation of a fourth-order
+  integrator over a small dt and is far below the process noise. Behaviour
+  under matched params: clean covariance sawtooth (grow over the 20 predict-only
+  steps, collapse at each update), position error <2mm, zero-mean innovation.
+  Under a 2x kappa mismatch (true 1/50, model 1/25): the filter still TRACKS
+  (position error bounded ~5mm, not diverging — measurements keep pulling it
+  back) but its innovation goes systematically biased and heading drifts to
+  ~0.47 rad. That bias is what model mismatch looks like from inside the filter,
+  and it is the signal Phase 4's learned model would consume.
+
+  Two caveats recorded here so a future phase doesn't trip on them:
+
+  - **The innovation-mean caveat (a Phase 4 diagnostic-design point).** Mean
+    innovation is a valid bias summary only on a CONSTANT-sign arc — which is
+    what `test_tracks_under_model_mismatch` uses (all b=+1), so its
+    `|mean| > 1.0mm` assertion is sound. But on an S-curve the bias REVERSES
+    with the turn and partially cancels in the mean, so mean innovation
+    UNDERSTATES the effect. This is visible in `eyeball_ekf.py`: the S-curve
+    mismatch panel flips innovation sign at the b=+1→b=-1 handover (~step 300)
+    and the printed mean (≈ x=-0.14, y=+0.62) is smaller than either half's
+    per-segment bias. For Phase 4, prefer MEAN ABSOLUTE innovation, or
+    innovation correlated against the control `b`, as the bias summary — mean
+    innovation alone is misleading on any trajectory that changes turn sign.
+
+  - **The Jacobian tripwire (leave the failing test failing).**
+    `test_jacobian_structure` asserts theta's row is exactly [0, 0, 1], which
+    holds ONLY at constant kappa (theta_dot = v*kappa*b is state-independent).
+    Phase 4 makes kappa position-dependent, at which point theta_dot depends on
+    x and y, the bottom row gains terms, and THIS TEST WILL FAIL. That failure
+    is the intended signal that the Jacobian needs its new terms — do not delete
+    or weaken the assertion to make it pass; add the terms. The `jacobian`
+    docstring's "WHEN THIS BREAKS" note is the paired reminder in the source.
+
+  Scope note: the roadmap's Phase 3 line reads "EKF + particle filter,
+  closed-loop replanning." The particle filter is DELIBERATELY declined, not
+  skipped — the model is smooth, low-dimensional and only mildly nonlinear,
+  the regime where linearisation works and a PF's multimodal advantage doesn't
+  materialise (rationale in the `ekf.py` DESIGN CHOICES docstring; the honest
+  limitation — the EKF's unimodal-Gaussian assumption would fail under genuine
+  tip-location ambiguity, which continuous position measurement prevents — is
+  recorded there too). Closed-loop replanning (feeding the belief back to a
+  planner and replanning on drift) is NOT yet built; it is the remaining Phase 3
+  deliverable before Phase 4.

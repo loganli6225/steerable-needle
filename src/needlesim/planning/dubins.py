@@ -183,9 +183,11 @@ def _discretise_straight(length: float, v: float, dt: float) -> list:
     if n % 2 == 0:
         n += 1
     true_dt = length / (v * n)
-    first_half_seg = [(Control(v, b=-1), true_dt/2)]
-    middel_segs = [(Control(v, b=+1), true_dt), (Control(v, b=-1), true_dt)] * ((n-1)//2)
-    last_half_seg = [(Control(v, b=+1), true_dt/2)]
+    first_half_seg = [(Control(v, b=-1), true_dt / 2)]
+    middel_segs = [(Control(v, b=+1), true_dt), (Control(v, b=-1), true_dt)] * (
+        (n - 1) // 2
+    )
+    last_half_seg = [(Control(v, b=+1), true_dt / 2)]
     seg = first_half_seg + middel_segs + last_half_seg
     return seg
 
@@ -256,31 +258,36 @@ def _csc_candidate(
     """
     c1_x, c1_y = _turning_center(start, first_left, R)
     c3_x, c3_y = _turning_center(goal, last_left, R)
-    d = math.sqrt((c1_x - c3_x)**2 + (c1_y - c3_y)**2)
+    d = math.sqrt((c1_x - c3_x) ** 2 + (c1_y - c3_y) ** 2)
     theta = math.atan2(c3_y - c1_y, c3_x - c1_x)
 
     if first_left == last_left:
-        off = theta - math.pi/2 if first_left else theta + math.pi/2
-        t1_x, t1_y = c1_x + R*(math.cos(off)), c1_y + R*(math.sin(off))
-        t2_x, t2_y = c3_x + R*(math.cos(off)), c3_y + R*(math.sin(off))
+        off = theta - math.pi / 2 if first_left else theta + math.pi / 2
+        t1_x, t1_y = c1_x + R * (math.cos(off)), c1_y + R * (math.sin(off))
+        t2_x, t2_y = c3_x + R * (math.cos(off)), c3_y + R * (math.sin(off))
         straight = d
     else:
         if d < 2 * R:
             return None
-        straight = math.sqrt(d*d - 4*R*R)
-        alpha = math.atan2(2*R, straight)
+        straight = math.sqrt(d * d - 4 * R * R)
+        alpha = math.atan2(2 * R, straight)
         base = theta + alpha if first_left else theta - alpha
-        off = base - math.pi/2 if first_left else base + math.pi/2
-        t1_x, t1_y = c1_x + R*math.cos(off), c1_y + R*math.sin(off)
-        t2_x, t2_y = c3_x - R*math.cos(off), c3_y - R*math.sin(off)
+        off = base - math.pi / 2 if first_left else base + math.pi / 2
+        t1_x, t1_y = c1_x + R * math.cos(off), c1_y + R * math.sin(off)
+        t2_x, t2_y = c3_x - R * math.cos(off), c3_y - R * math.sin(off)
 
     phi1 = _arc_angle((c1_x, c1_y), (start.x, start.y), (t1_x, t1_y), first_left)
     phi3 = _arc_angle((c3_x, c3_y), (t2_x, t2_y), (goal.x, goal.y), last_left)
-    length = R*(phi1 + phi3) + straight
+    length = R * (phi1 + phi3) + straight
 
-    controls = _discretise_arc(phi1, R, first_left, v, dt) + _discretise_straight(straight, v, dt) + _discretise_arc(phi3, R, last_left, v, dt)
+    controls = (
+        _discretise_arc(phi1, R, first_left, v, dt)
+        + _discretise_straight(straight, v, dt)
+        + _discretise_arc(phi3, R, last_left, v, dt)
+    )
     word = ("L" if first_left else "R") + "S" + ("L" if last_left else "R")
     return DubinsPath(controls=controls, length=length, word=word)
+
 
 # ---------------------------------------------------------------------------
 # The two public entry points.

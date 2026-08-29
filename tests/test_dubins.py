@@ -25,7 +25,7 @@ from needlesim.models.unicycle_needle import NeedleParams, State, rollout_variab
 from needlesim.planning.dubins import dubins_ccc, dubins_full
 
 KAPPA = 1.0 / 20.0  # R = 20 mm (kept from Task 3.5: geometry is scale-free,
-R = 1.0 / KAPPA     # so these tests need not move to the realistic kappa)
+R = 1.0 / KAPPA  # so these tests need not move to the realistic kappa)
 V = 5.0
 DT = 0.05
 PARAMS = NeedleParams(kappa=KAPPA)
@@ -65,8 +65,7 @@ def test_full_controls_land_at_goal(goal):
     assert path is not None, "dubins_full should connect essentially any poses"
     end = rollout_variable(start, path.controls, PARAMS)[-1]
     assert math.hypot(end.x - goal.x, end.y - goal.y) < POS_TOL, (
-        f"{path.word} ended at ({end.x:.3f},{end.y:.3f}), goal "
-        f"({goal.x},{goal.y})"
+        f"{path.word} ended at ({end.x:.3f},{end.y:.3f}), goal " f"({goal.x},{goal.y})"
     )
     dtheta = (end.theta - goal.theta + math.pi) % (2 * math.pi) - math.pi
     assert abs(dtheta) < THETA_TOL, f"{path.word} heading off by {dtheta:.4f} rad"
@@ -136,9 +135,10 @@ def test_ccc_sometimes_wins():
     full = dubins_full(start, goal, PARAMS, V, DT)
     ccc = dubins_ccc(start, goal, PARAMS, V, DT)
     assert full is not None and ccc is not None
-    assert full.word in ("RLR", "LRL"), (
-        f"expected a CCC word to win at this config, got {full.word}"
-    )
+    assert full.word in (
+        "RLR",
+        "LRL",
+    ), f"expected a CCC word to win at this config, got {full.word}"
     assert abs(full.length - ccc.length) < 1e-9
 
 
@@ -185,10 +185,10 @@ def test_returns_cleanly_not_raise():
     or None, never raise."""
     start = State(0.0, 0.0, 0.0)
     for goal in [
-        State(0.0, 0.0, 0.0),          # identical pose
-        State(1e-9, 0.0, 0.0),         # degenerate separation
-        State(0.0, 0.0, math.pi),      # same point, reversed heading
-        State(1000.0 * R, 0.0, 0.0),   # very far
+        State(0.0, 0.0, 0.0),  # identical pose
+        State(1e-9, 0.0, 0.0),  # degenerate separation
+        State(0.0, 0.0, math.pi),  # same point, reversed heading
+        State(1000.0 * R, 0.0, 0.0),  # very far
     ]:
         dubins_full(start, goal, PARAMS, V, DT)  # must not raise
 

@@ -120,7 +120,9 @@ learned / estimation half (Phases 3–4), and all still pending model mismatch:
       mismatch. Ablation must show the *uncertainty* does the work, not just
       added conservatism.
 - [ ] EKF vs particle filter for tip tracking: which wins, and under what
-      measurement noise / dropout regimes?
+      measurement noise / dropout regimes? (EKF built — Phase 3; PF
+      deliberately declined for now, see roadmap. The head-to-head this
+      sub-claim asks for is still open.)
 - [ ] Learned sampling distributions speed up RRT without hurting success
       rate.
 
@@ -139,8 +141,14 @@ benchmarks above answer the classical side of the working question (and
 falsified one hypothesis along the way). Delivered: the needle model, grid
 environment, the three planners (vanilla/kinodynamic/RRT*), full Dubins
 steering, the shared-scaffolding refactor, and both benchmarks; see
-`docs/roadmap.md` for the as-executed history. **Not yet begun:** Phase 3
-(EKF / particle filter, closed-loop replanning) and Phase 4 (learned deflection
-model, learned sampling) — which is also where the first genuine `true_needle`
-vs `model_needle` mismatch enters. Until then, every "endpoint error" above is a
-planning artifact under one shared model, not tissue mismatch.
+`docs/roadmap.md` for the as-executed history. **In progress:** Phase 3
+estimation — the EKF is built and tested (`src/needlesim/estimation/ekf.py`),
+and it is the first place the `true_needle` vs `model_needle` split does real
+work: the simulator steps with true kappa, the filter predicts with model
+kappa, and under a 2x mismatch the filter tracks (bounded ~5mm) while its
+innovation goes systematically biased — the Phase 4 signal. Still to come in
+Phase 3: closed-loop replanning (the particle filter is deliberately declined,
+see roadmap). **Not yet begun:** Phase 4 (learned deflection model, learned
+sampling). Note that with the EKF, endpoint/estimate errors under mismatch are
+now genuine `true` vs `model` results, not one-shared-model artifacts; the
+planning "endpoint error" figures above remain single-model planning artifacts.
