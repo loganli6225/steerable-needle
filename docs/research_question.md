@@ -110,6 +110,44 @@ so it must track the workspace — one more tuning surface, and it sits alongsid
 the cost finding as a reason the forward, monotonic kinodynamic planner is the
 better fit for a forward, monotonic insertion problem.
 
+## What closing the loop found (Phase 3.5, estimation half)
+
+The EKF (Phase 3) is the first place the `true_needle` vs `model_needle` split
+does real work — under a 2x kappa mismatch (true 1/50, model 1/25) the filter
+tracks with bounded error (~3.6mm measured, not diverging) while its innovation
+goes systematically biased (mean ~1–1.7mm per axis, against ~0.15mm matched),
+the signal Phase 4's learned model would consume. Phase 3.5 feeds that estimate
+back to the planner: plan from the estimate, execute a prefix, update the EKF,
+replan when cross-track drift exceeds a threshold. Full detail in
+`docs/roadmap.md`; the claims, briefly:
+
+**Closed-loop replanning helps under constraint and slightly hurts in open
+space — the value is CONDITIONAL, and "it improves accuracy" would overclaim.**
+Over 5 seeds × 4 model curvatures (medians, mm): on `constrained_passage`, where
+precision is required, open-loop degrades with mismatch (6.5 → 11.9 → 18.6 at
+model 1/40, 1/33, 1/25) while closed-loop beats it at every level (3.5 → 9.1 →
+4.4) and wins 5/5 seeds at 1/25. On `open`, open-loop is essentially immune
+(2.9mm at every level) and closed-loop matches it at low mismatch but degrades
+at 1/25 (6.0mm, winning only 2/5): where open-loop already lands inside the goal
+tolerance, replanning is an unnecessary intervention that only adds variance.
+So closed-loop recovers most of the accuracy lost to curvature error where it is
+needed, and mildly costs where it is not.
+
+**The curvature-vs-scale constraint appears a FOURTH time, in the guard.** A
+replan firing 15.6mm from the goal at 0.89 rad of heading offset returned a
+399mm plan (25x direct) whose loop left the workspace: at R = 1/kappa, a heading
+correction costs R·off of arc, and near the goal the distance remaining shrinks
+below that, so the correction is geometrically impossible and the planner can
+only loop. The guard suppresses replanning when `R · heading_offset >
+distance_to_goal`, computed with MODEL kappa (using truth would be the same
+cheat as planning from truth). This is the same governing ratio behind RRT*'s
+failure to connect at anatomical scale, the 8mm doorway, and kinodynamic's 5mm
+edge at R=5mm: the turning radius must be small relative to the distances over
+which corrections are required. It is the through-line of the project.
+
+(These are genuine `true`-vs-`model` results — the simulator steps true kappa,
+the filter and planner use model kappa — not single-model artifacts.)
+
 ## Falsifiable sub-claims to test later
 
 The classical comparison above is settled. These remain open — all on the
@@ -141,14 +179,18 @@ benchmarks above answer the classical side of the working question (and
 falsified one hypothesis along the way). Delivered: the needle model, grid
 environment, the three planners (vanilla/kinodynamic/RRT*), full Dubins
 steering, the shared-scaffolding refactor, and both benchmarks; see
-`docs/roadmap.md` for the as-executed history. **In progress:** Phase 3
-estimation — the EKF is built and tested (`src/needlesim/estimation/ekf.py`),
-and it is the first place the `true_needle` vs `model_needle` split does real
-work: the simulator steps with true kappa, the filter predicts with model
-kappa, and under a 2x mismatch the filter tracks (bounded ~5mm) while its
-innovation goes systematically biased — the Phase 4 signal. Still to come in
-Phase 3: closed-loop replanning (the particle filter is deliberately declined,
-see roadmap). **Not yet begun:** Phase 4 (learned deflection model, learned
-sampling). Note that with the EKF, endpoint/estimate errors under mismatch are
-now genuine `true` vs `model` results, not one-shared-model artifacts; the
-planning "endpoint error" figures above remain single-model planning artifacts.
+`docs/roadmap.md` for the as-executed history. **Complete:** Phase 3 estimation
+(the EKF, `src/needlesim/estimation/ekf.py`) and Phase 3.5 closed-loop control
+(`src/needlesim/control/closed_loop.py`) — the first places the `true_needle` vs
+`model_needle` split does real work: the simulator steps with true kappa, the
+filter predicts with model kappa, and under a 2x mismatch the filter tracks
+(bounded ~3.6mm) while its innovation goes systematically biased (the Phase 4
+signal). Closing the loop on that estimate helps conditionally — recovering
+accuracy where precision is required (`constrained_passage`, 5/5 seeds at 2x
+mismatch, 18.6 → 4.4mm) and slightly degrading it in open space where open-loop
+already suffices (see the section above). The particle filter is deliberately
+declined (see roadmap). **Not yet begun:** Phase 4 (learned deflection model,
+learned sampling). Note that with the EKF and closed loop, endpoint/estimate
+errors under mismatch are now genuine `true` vs `model` results, not
+one-shared-model artifacts; the planning "endpoint error" figures above remain
+single-model planning artifacts.

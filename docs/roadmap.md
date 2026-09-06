@@ -549,5 +549,90 @@ of decisions made in earlier phases; do not quietly drop them.
   limitation — the EKF's unimodal-Gaussian assumption would fail under genuine
   tip-location ambiguity, which continuous position measurement prevents — is
   recorded there too). Closed-loop replanning (feeding the belief back to a
-  planner and replanning on drift) is NOT yet built; it is the remaining Phase 3
-  deliverable before Phase 4.
+  planner and replanning on drift) is built next, as Phase 3.5.
+- **Phase 3.5: closed-loop control (plan / execute / estimate / replan) —
+  complete.** Closes the loop the Phase 3 EKF left open. `run_closed_loop` in
+  `src/needlesim/control/closed_loop.py` plans from the FILTER'S estimate (never
+  truth), executes a prefix, updates the EKF on intermittent position
+  measurements, and replans from the estimate when cross-track drift from the
+  planned polyline exceeds a threshold; `run_open_loop` is the explicit baseline
+  (plan once, execute blind). The `true_needle` vs `model_needle` split does the
+  work here for the fourth place in the codebase: the simulator steps with TRUE
+  kappa, the filter and planner both use MODEL kappa, and closed-loop is the only
+  mechanism by which that model error gets CORRECTED rather than ACCUMULATED.
+  Sweep + per-seed tables via `scripts/sweep_closed_loop.py`; terminal-approach
+  diagnosis via `scripts/diagnose_replans.py`. Tests in
+  `tests/test_closed_loop.py` (the dedicated headline test
+  `test_closed_loop_beats_open_loop_under_mismatch` is left an unfilled stub and
+  skipped on purpose — the result is CONDITIONAL, so a single assert-cl-beats-ol
+  would be false on `open`; the claim lives in the sweep tables below, not a
+  one-pair assertion).
+
+  **The result is CONDITIONAL — "closed-loop improves accuracy" would be an
+  overclaim.** Measured over 5 seeds × 4 model curvatures (true 1/50); medians in
+  mm:
+
+  - `constrained_passage` (precision required): open-loop degrades with mismatch
+    (6.5 → 11.9 → 18.6 at model 1/40, 1/33, 1/25); closed-loop beats it at every
+    level (3.5 → 9.1 → 4.4) and wins 5/5 seeds at 1/25. This is where replanning
+    earns its ~1.6s cost.
+  - `open` (open-loop already within tolerance): open-loop is essentially immune
+    (2.9 at every level); closed-loop matches it at low mismatch and DEGRADES at
+    1/25 (median 6.0, winning only 2/5). Where open-loop already lands inside the
+    goal tolerance, replanning is an unnecessary intervention that can only add
+    variance — a reading the data support, not merely allow: every closed-loop
+    degradation on `open` traces to a replan that fired when open-loop needed
+    none.
+
+  So closed-loop recovers most of the accuracy lost to curvature error WHERE
+  PRECISION IS REQUIRED, and slightly degrades it where open-loop already
+  suffices. The value is conditional on the scenario.
+
+  **The terminal-approach guard, derived from a diagnosed failure.** Diagnosed
+  on `open`, seed 1, model 1/25 (`scripts/diagnose_replans.py`): a replan firing
+  15.6mm from the goal with 0.89 rad of heading offset returned a 399mm plan —
+  25x the direct distance — whose loop drove the needle off the workspace.
+  Mechanism: at radius R = 1/kappa, correcting a heading error of `off` radians
+  costs R·off of arc; at R=25mm, 0.89 rad needs ~22mm of travel against 15.6mm
+  remaining, so the correction is geometrically impossible and the planner can
+  only answer with a loop (both curvatures loop from those poses; the true-kappa
+  planner failed outright at 20,000 iterations). The guard suppresses replanning
+  when `R · heading_offset > distance_to_goal`, computed with MODEL kappa — using
+  truth there would be the same cheat as planning from truth and would invalidate
+  the result. After it: `off_map` terminations vanished from `open` entirely, and
+  `constrained_passage` at 1/25 improved from 3/5 to 5/5 wins.
+
+  **This is the FOURTH appearance of the curvature-vs-scale constraint** — after
+  RRT* unable to connect at anatomical scale (Task 3.6), the 8mm doorway, and
+  kinodynamic's 5mm edge at R=5mm. The governing ratio, the through-line of the
+  project: the turning radius must be small relative to the distances over which
+  corrections are required. Terminal-approach replanning violates it because the
+  distance remaining shrinks toward zero as the goal nears while the heading
+  error need not — so near the goal even a modest heading offset is
+  uncorrectable, and the planner's only honest answer is a loop the guard must
+  forbid.
+
+  **Two instrumentation bugs fixed, both of which changed the numbers.** (a)
+  Out-of-bounds was being counted as a collision: `env.clearance` returns -1.0
+  outside the world (a documented Task 2 TODO), so `is_free` reported False and
+  leaving the arena registered as an obstacle strike. Now separated — `collided`
+  is guarded by an in-bounds check and out-of-bounds terminates the run with
+  reason `left_bounds`. This removed all three "collisions" on `open` at 1/25;
+  they were never obstacle contacts. (b) A per-run `termination_reason` was added,
+  because the error number alone conflates "stopped at 58mm having given up"
+  (`replan_cap`) with "wandered to 58mm because it would not" (`left_bounds`).
+
+  **One residual, documented not chased.** `constrained_passage` at model 1/33
+  still produces `off_map` on 2 of 5 seeds (worst 107.2mm), while 1/40 and 1/25
+  are clean. The guard's arithmetic is a LOWER bound — it checks that the heading
+  correction fits in the remaining distance but ignores that the needle must also
+  COVER that distance while turning — so at this one level the correction is
+  marginally "possible" by the guard, replanning proceeds, and still returns a
+  loop. A known limitation of the guard, flagged rather than fixed.
+
+  Note on the sweep script: an earlier version of `sweep_closed_loop.py` had a
+  variable-scoping bug (`for SCENARIO in ...` shadowed a function-local while
+  `make_env` and the start/goal read the module global), so it ran
+  `constrained_passage` twice and its "open" table was a mislabelled duplicate.
+  The `open` findings above were verified against a corrected run and the script
+  now takes the scenario explicitly; the constrained numbers were unaffected.
