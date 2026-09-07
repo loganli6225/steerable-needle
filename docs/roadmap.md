@@ -637,7 +637,7 @@ of decisions made in earlier phases; do not quietly drop them.
   The `open` findings above were verified against a corrected run and the script
   now takes the scenario explicitly; the constrained numbers were unaffected.
 - **Phase 4a: joint state-parameter estimation (kappa in the filter state) —
-  ESTIMATOR HALF complete; feedback experiment not yet begun.**
+  complete (estimator half AND feedback loop).**
   `AugmentedNeedleEKF` in `src/needlesim/estimation/ekf_augmented.py` extends
   the Phase 3 filter to a state of `(x, y, theta, log kappa)`, so curvature is
   estimated online from the same position-only intermittent measurements
@@ -721,12 +721,56 @@ of decisions made in earlier phases; do not quietly drop them.
   and this file before verification caught it. A measured number is bound to the
   setup that produced it.
 
-  **What is NOT yet done.** The filter learns kappa, but NOTHING CONSUMES IT
-  yet — the planner is still constructed with a fixed model kappa; `ekf.params`
-  exposes kappa_hat but is not wired into the closed loop. So 4a currently shows
-  the estimate CONVERGES, not that converging buys anything. The feedback
-  experiment — rebuild the planner from `ekf.params` at each replan and rerun
-  the Phase 3.5 sweep, for the three-way open-loop / closed-loop-fixed-wrong-
-  kappa / closed-loop-learned-kappa comparison — is the next step, and is what
-  turns "the estimate converges" into "and here is what it recovers, in
-  millimetres at the target."
+  **The feedback loop is now built — and the estimate is consumed.**
+  `run_closed_loop_adaptive` in `src/needlesim/control/adaptive_loop.py`
+  rebuilds the planner from `ekf.params` at each replan, closing the gap the
+  estimator half left open. It extends Phase 3.5's two conditions to five:
+  beyond open-loop (1) and drift-triggered replanning with a FIXED wrong kappa
+  (2), it provides drift- (3), kappa-change- (4), and union-triggered (5)
+  replanning, all from the LEARNED kappa.
+
+  **The result: fixing the model beats merely re-aiming, and the win is in the
+  TAIL.** Over five seeds on `constrained_passage` at 2x mismatch (true 1/50,
+  initial guess 1/25):
+
+  | condition | median | range |
+  |---|---|---|
+  | open-loop (Phase 3.5) | 18.6mm | — |
+  | closed-loop, FIXED wrong kappa (Phase 3.5) | 4.4mm | 2.8–16.1 |
+  | closed-loop, LEARNED kappa (this phase) | 3.0mm | 2.8–6.1 |
+
+  The median improvement over fixed-kappa is modest — 3.0mm is close to the
+  3.0mm goal-tolerance floor, so there is little headroom left once replanning
+  from a better pose has done its work. The clinically meaningful effect is the
+  TAIL: fixed-kappa's worst seed lands 16.1mm out, learned-kappa's 6.1mm. A
+  method that usually works and occasionally misses by 16mm is not deployable;
+  one bounded at 6mm is a different proposition. On `open`, where open-loop is
+  already adequate (median 2.9mm) and replanning of any kind is an intervention
+  without a problem, learning does not make the degradation worse than
+  fixed-kappa (learned 4.8mm vs fixed 6.0mm median) — a deliberately weak,
+  one-directional claim, since asserting more of a five-seed difference would
+  overstate it. Both directions are pinned in `tests/test_adaptive_loop.py`
+  (median-plus-worst-case under constraint; no-harm in the open).
+
+  **The union trigger is near-redundant with kappa-change, and that is the
+  result.** A union trigger (replan on drift OR kappa-change) fires almost
+  identically to the kappa-change trigger alone (9/10 runs, 5 seeds x 2
+  scenarios). Model-triggered replanning refreshes the path before cross-track
+  drift can accumulate, so the drift arm is largely inert once kappa-replanning
+  is active. Drift, which Phase 3.5 treated as the primary replanning signal, is
+  therefore mostly a SYMPTOM of model error rather than an independent one —
+  which also partly explains why replanning-on-drift helped in Phase 3.5 but
+  only partially: it was treating the symptom. (The sole exception across the 10
+  runs, open seed 1, adds one drift replan at step 381 that helps, 3.9mm ->
+  3.0mm — so the drift arm is near-inert, not entirely so.)
+
+  **The methodological lesson (a third instance of the re-measure theme).** The
+  union was predicted to "fire roughly the sum of conditions 3 and 4," inferred
+  from the two triggers' firing patterns measured in INDEPENDENT single-trigger
+  runs (kappa-change ~21-81, drift ~101-281, near-disjoint). That inference is
+  wrong, and the combined run exposes why: the firing pattern of a combined
+  trigger cannot be predicted from the firing patterns of its components run
+  independently, because each component alters the trajectory the others
+  observe. This joins the KD-tree "O(n) scans are the bottleneck" profiling
+  assumption and the stale plain-kappa 3.1e-2 Jacobian figure as a third case of
+  the same theme — re-measure after the thing being measured changes.

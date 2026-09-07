@@ -188,11 +188,28 @@ the state changed to log(kappa); the test now guards the terms it claimed to
 (fourth-column assertion) and the docstrings are fixed. Both are the same
 lesson: re-measure after the thing being measured changes.
 
-**Not yet closed: nothing consumes kappa_hat.** The estimate converges, but the
-planner is still built with a fixed model kappa. The feedback experiment — plan
-from `ekf.params` at each replan and rerun the Phase 3.5 sweep, comparing
-open-loop / closed-loop-fixed-wrong / closed-loop-learned — is what will turn
-"the estimate converges" into a millimetres-at-target result. It is next.
+**Feeding the estimate back beats merely re-aiming — and the win is in the
+tail.** `run_closed_loop_adaptive` (`src/needlesim/control/adaptive_loop.py`)
+rebuilds the planner from `ekf.params` at each replan, so the plan tracks the
+learned curvature rather than the original wrong guess. Over five seeds on
+`constrained_passage` at 2x mismatch (medians): open-loop 18.6mm, closed-loop
+with a FIXED wrong kappa 4.4mm (worst seed 16.1mm), closed-loop with LEARNED
+kappa 3.0mm (worst seed 6.1mm). The median gain over fixed-kappa is small —
+3.0mm sits near the 3.0mm goal tolerance — but the tail collapses from 16.1mm to
+6.1mm, which is the clinically meaningful half: a method bounded at 6mm is
+deployable where one that occasionally misses by 16mm is not. On `open`, where
+open-loop already suffices and replanning is an intervention without a problem,
+learning does not worsen the degradation relative to fixed-kappa. Both
+directions are test-pinned (`tests/test_adaptive_loop.py`).
+
+A trigger sub-finding worth keeping: replanning on EITHER cross-track drift or a
+material change in the kappa belief (a union) fires almost identically to the
+kappa-change trigger alone (9/10 runs). Model-triggered replanning refreshes the
+path before drift can accumulate, so drift is mostly a SYMPTOM of model error
+rather than an independent signal — which partly explains why Phase 3.5's
+drift-triggered replanning helped but only partially: it was treating the
+symptom. (These estimation-half results are all genuine `true`-vs-`model`: the
+simulator steps true kappa, the filter and planner use the learned belief.)
 
 ## Falsifiable sub-claims to test later
 
@@ -235,14 +252,16 @@ signal). Closing the loop on that estimate helps conditionally — recovering
 accuracy where precision is required (`constrained_passage`, 5/5 seeds at 2x
 mismatch, 18.6 → 4.4mm) and slightly degrading it in open space where open-loop
 already suffices (see the section above). The particle filter is deliberately
-declined (see roadmap). **Phase 4a (kappa in the filter state) — estimator half
-complete, feedback not yet wired:** the augmented EKF
-(`src/needlesim/estimation/ekf_augmented.py`) recovers kappa from a 2x wrong
-prior to within 2–5% with an honest uncertainty band, but nothing consumes the
-estimate yet — the planner still uses a fixed model kappa, so the feedback
-experiment is what remains. This is classical parameter estimation and the
-baseline for 4c's learned (position-dependent) kappa. **Not yet begun:** Phase
-4c (learned deflection model / spatial kappa field, learned sampling). Note that
+declined (see roadmap). **Phase 4a (kappa in the filter state) — complete:** the
+augmented EKF (`src/needlesim/estimation/ekf_augmented.py`) recovers kappa from a
+2x wrong prior to within 2–5% with an honest uncertainty band, and
+`run_closed_loop_adaptive` (`src/needlesim/control/adaptive_loop.py`) feeds that
+estimate back — rebuilding the planner from the learned kappa at each replan.
+Under constraint that beats a fixed wrong kappa mainly in the tail (worst seed
+16.1 → 6.1mm; median 4.4 → 3.0mm), and does no harm in the open. This is
+classical parameter estimation and the baseline for 4c's learned
+(position-dependent) kappa. **Not yet begun:** Phase 4c (learned deflection
+model / spatial kappa field, learned sampling). Note that
 with the EKF and closed loop, endpoint/estimate
 errors under mismatch are now genuine `true` vs `model` results, not
 one-shared-model artifacts; the planning "endpoint error" figures above remain
