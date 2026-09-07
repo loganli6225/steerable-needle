@@ -636,3 +636,97 @@ of decisions made in earlier phases; do not quietly drop them.
   `constrained_passage` twice and its "open" table was a mislabelled duplicate.
   The `open` findings above were verified against a corrected run and the script
   now takes the scenario explicitly; the constrained numbers were unaffected.
+- **Phase 4a: joint state-parameter estimation (kappa in the filter state) —
+  ESTIMATOR HALF complete; feedback experiment not yet begun.**
+  `AugmentedNeedleEKF` in `src/needlesim/estimation/ekf_augmented.py` extends
+  the Phase 3 filter to a state of `(x, y, theta, log kappa)`, so curvature is
+  estimated online from the same position-only intermittent measurements
+  rather than assumed.
+
+  **This is classical estimation, not machine learning, and that is the point.**
+  4a is recursive/joint state-parameter estimation: one unknown scalar, estimated
+  live from a signal the filter already computes — no dataset, no model class,
+  no train/test split. An EKF augmentation is the RIGHT tool for a single
+  well-posed parameter; reaching for a learned model here would be worse
+  engineering. The machine learning is 4c, where kappa varies with POSITION and
+  must be learned from trajectory data — and 4a is 4c's BASELINE, the reason it
+  comes first: "does learning a spatial field beat optimally estimating a single
+  number?" cannot be asked without the number-estimating version to compare
+  against.
+
+  **Log parameterisation, chosen over clamping.** The fourth state is
+  log(kappa), not kappa, because kappa must stay positive: `dubins_full`
+  computes R = 1/kappa, so a zero/negative estimate breaks the planner this
+  phase exists to feed. Clamping would work but stops it being strictly a
+  Kalman filter — the covariance is computed by the standard update and knows
+  nothing about the constraint, so P[3,3] could report high confidence in a
+  value the clamp is holding. Log space avoids that: any real state is valid,
+  kappa = exp(state) is positive by construction, no clamp (verified: no
+  clamp/clip/min/max anywhere in `update`, and `test_kappa_stays_positive_
+  without_clamping` drives log-kappa hard toward the zero boundary — down to
+  ~1/5790 — and it stays positive). The uncertainty band is therefore
+  MULTIPLICATIVE in kappa-space (`kappa * exp(+/- sd_log)`); plotting
+  `kappa +/- sqrt(variance)` would be wrong and could dip negative.
+
+  **The result: kappa converges from a 2x wrong prior.** Starting the filter
+  believing 1/25 while the world runs at 1/50 (the same mismatch Phase 3.5
+  measured), over 1200 steps: alternating-b leaves 5.4% of the initial error
+  (final 1/47.4), the pure arc 2.1% (final 1/49.0) — ~95% recovered using only
+  noisy position measurements, curvature never observed directly. The mechanism
+  is Phase 3's heading-recovery correlation chain one level deeper
+  (kappa -> theta -> position, built in the covariance by `predict`, so H's zero
+  fourth column does not prevent correction; asserted in
+  `test_predict_builds_kappa_position_correlation`). The reported uncertainty is
+  HONEST, not just converging: the +/-1 sigma band narrows as evidence
+  accumulates (log-sd 0.65 -> 0.11 / 0.05) and contains the true value on
+  63%/82% of steps — near the ~68% a calibrated 1-sigma band should, i.e. not
+  overconfident. Regenerated (numbers + band-coverage check + figure) by
+  `scripts/kappa_convergence.py`.
+
+  **A corrected assumption (recorded, not buried).** The module docstring
+  originally asserted as fact that kappa is only observable while TURNING, so
+  pure constant-b arcs make it poorly identifiable (a wrong kappa and a wrong
+  initial heading producing similar traces). The measurement DISAGREED: the pure
+  arc converged BETTER (2.1% vs 5.4%). The ambiguity requires the HEADING prior
+  to be genuinely uncertain; this filter starts with a confident heading prior
+  (sigma 0.05 rad) and a bad kappa prior, so heading is pinned and position
+  evidence flows into kappa, while flipping b partially CANCELS the accumulating
+  position error that carries the signal. Recorded in the docstring rather than
+  asserted as a test — one seed at one parameter set corrects an assumption but
+  does not establish a property — and the obsolete
+  `test_kappa_less_observable_on_a_pure_arc` (and its helper) were deleted.
+
+  **A second correction, of my own verification (the instructive one).** The
+  Jacobian's fourth column carries a chain-rule factor of kappa plus two
+  second-order position terms (d(x')/d(log k), d(y')/d(log k)); the terms ARE
+  correct and cut the FOURTH-COLUMN residual against finite differences from
+  ~4e-4 to ~2e-6. But an earlier writeup claimed omitting them raises the
+  WHOLE-MATRIX error to 3.1e-2, "caught" by the test's 5e-3 tolerance. That did
+  not reproduce: the matrix max stays ~6e-4 with or without the terms, because
+  it lives in the theta column (the Euler-vs-RK4 pose residual), which these
+  terms do not touch — so the whole-matrix bar never guarded them, and the test
+  passed identically with them deleted. The 3.1e-2 figure belonged to a
+  PLAIN-kappa parameterisation (where d(theta')/d(kappa)=v*b*dt=0.25 makes the
+  column dominate the matrix max) and was carried over unchanged after the
+  switch to log-kappa. Fixed: `test_augmented_jacobian_matches_finite_
+  differences` now asserts on the fourth column directly at 1e-5 (mutation-
+  checked — zeroing the terms passes the matrix bar but fails the column bar at
+  every theta), and both docstrings are corrected.
+
+  **The through-line lesson: re-measure after the thing being measured
+  changes.** This is the second time a number of mine survived a context change
+  (the first: the KD-tree's "O(n) scans are the bottleneck" assumption, refuted
+  by profiling after the fact). The 3.1e-2 was true before the log
+  reparameterisation and false after it, and it propagated into two docstrings
+  and this file before verification caught it. A measured number is bound to the
+  setup that produced it.
+
+  **What is NOT yet done.** The filter learns kappa, but NOTHING CONSUMES IT
+  yet — the planner is still constructed with a fixed model kappa; `ekf.params`
+  exposes kappa_hat but is not wired into the closed loop. So 4a currently shows
+  the estimate CONVERGES, not that converging buys anything. The feedback
+  experiment — rebuild the planner from `ekf.params` at each replan and rerun
+  the Phase 3.5 sweep, for the three-way open-loop / closed-loop-fixed-wrong-
+  kappa / closed-loop-learned-kappa comparison — is the next step, and is what
+  turns "the estimate converges" into "and here is what it recovers, in
+  millimetres at the target."

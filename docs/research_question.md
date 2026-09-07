@@ -148,6 +148,52 @@ which corrections are required. It is the through-line of the project.
 (These are genuine `true`-vs-`model` results — the simulator steps true kappa,
 the filter and planner use model kappa — not single-model artifacts.)
 
+## What estimating kappa online found (Phase 4a, estimator half)
+
+Phase 3.5 replanned from a better *position* but kept carrying the same wrong
+*belief* — every new plan used the same fixed model kappa. Phase 4a puts kappa
+in the filter state: `AugmentedNeedleEKF` estimates `(x, y, theta, log kappa)`,
+correcting curvature from the same position-only measurements. Full detail in
+`docs/roadmap.md`; the claims, briefly:
+
+**This is classical estimation, and that is the right tool — not a concession.**
+4a is recursive joint state-parameter estimation of a single well-posed scalar:
+no dataset, no model class, no train/test split. The machine learning is 4c
+(kappa varying with *position*, learned from trajectory data); 4a is its
+baseline, and the interesting question — "does learning a spatial field beat
+optimally estimating a single number?" — cannot be posed without it.
+
+**Kappa converges from a 2x wrong prior, and the uncertainty is honest.** From a
+prior of 1/25 against a true 1/50, over 1200 steps, the estimate recovers ~95% of
+the error (5.4% remaining alternating-b, 2.1% pure arc) using only noisy position
+measurements, with curvature never directly observed — the same covariance
+correlation chain that recovered heading in Phase 3, one level deeper
+(kappa → theta → position). The +/-1 sigma band narrows with evidence and
+contains the truth on 63–82% of steps, near the ~68% of a calibrated band, so
+the filter is not merely converging but reporting honest confidence. Kept
+positive by construction via a log parameterisation (no clamp), so the estimate
+is safe to hand to a planner that computes R = 1/kappa. Regenerable end to end by
+`scripts/kappa_convergence.py`, including the band-coverage check.
+
+**A hypothesis measurement refuted (recorded, per the honesty policy above).**
+The classical intuition — kappa is only identifiable while *turning*, so pure
+arcs are poorly observable — was asserted as fact in the module docstring and
+then contradicted: the pure arc converged *better*. The ambiguity requires an
+uncertain *heading* prior; this filter's is confident, so heading is pinned and
+position evidence flows into kappa. Recorded, not asserted as a test (one seed
+corrects an assumption, it does not establish a property). A second correction
+was to my own verification of it — a "3.1e-2" Jacobian error figure that turned
+out to belong to a pre-log-space parameterisation and no longer applied after
+the state changed to log(kappa); the test now guards the terms it claimed to
+(fourth-column assertion) and the docstrings are fixed. Both are the same
+lesson: re-measure after the thing being measured changes.
+
+**Not yet closed: nothing consumes kappa_hat.** The estimate converges, but the
+planner is still built with a fixed model kappa. The feedback experiment — plan
+from `ekf.params` at each replan and rerun the Phase 3.5 sweep, comparing
+open-loop / closed-loop-fixed-wrong / closed-loop-learned — is what will turn
+"the estimate converges" into a millimetres-at-target result. It is next.
+
 ## Falsifiable sub-claims to test later
 
 The classical comparison above is settled. These remain open — all on the
@@ -189,8 +235,15 @@ signal). Closing the loop on that estimate helps conditionally — recovering
 accuracy where precision is required (`constrained_passage`, 5/5 seeds at 2x
 mismatch, 18.6 → 4.4mm) and slightly degrading it in open space where open-loop
 already suffices (see the section above). The particle filter is deliberately
-declined (see roadmap). **Not yet begun:** Phase 4 (learned deflection model,
-learned sampling). Note that with the EKF and closed loop, endpoint/estimate
+declined (see roadmap). **Phase 4a (kappa in the filter state) — estimator half
+complete, feedback not yet wired:** the augmented EKF
+(`src/needlesim/estimation/ekf_augmented.py`) recovers kappa from a 2x wrong
+prior to within 2–5% with an honest uncertainty band, but nothing consumes the
+estimate yet — the planner still uses a fixed model kappa, so the feedback
+experiment is what remains. This is classical parameter estimation and the
+baseline for 4c's learned (position-dependent) kappa. **Not yet begun:** Phase
+4c (learned deflection model / spatial kappa field, learned sampling). Note that
+with the EKF and closed loop, endpoint/estimate
 errors under mismatch are now genuine `true` vs `model` results, not
 one-shared-model artifacts; the planning "endpoint error" figures above remain
 single-model planning artifacts.
