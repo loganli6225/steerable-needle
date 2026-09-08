@@ -35,3 +35,6 @@ data/
 .idea/
 .vscode/
 *_prompt_*.md
+
+# Scratch diagnostic figures written to repo root by scripts (deliverables live in docs/figures/)
+/*.png
