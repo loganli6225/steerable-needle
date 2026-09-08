@@ -211,6 +211,55 @@ drift-triggered replanning helped but only partially: it was treating the
 symptom. (These estimation-half results are all genuine `true`-vs-`model`: the
 simulator steps true kappa, the filter and planner use the learned belief.)
 
+## What the field baseline found (Phase 4c baseline, before any learned model)
+
+Phase 4b gave the SIMULATOR a depth-dependent curvature field (four layers,
+fat/muscle/capsule/gland, R = 34/22/15/28mm) while the planner and filters still
+believe a single scalar. Before building anything that learns the field, the
+five-way comparison was run against the field-carrying simulator with a scalar
+belief of 1/29 (the thickness-weighted mean of the layer radii over the 150mm
+workspace — an uninformed average prior, not a fitted value). This is the number
+4c must beat. Full detail in `docs/roadmap.md`; the claims, briefly (all genuine
+`true`-vs-`model`: the field drives the sim, the scalar belief drives the
+planner and filters):
+
+**Spatial structure hurts even when the average is right.** Open-loop final
+error — the mismatch with no correction — jumps from 2.8mm against a 2x CONSTANT
+kappa mismatch to 26.5mm against a FIELD of the same average curvature on the
+`open` scenario (~9x worse, though the belief is correct on average); on
+`constrained_passage` open-loop was already ~18mm under the constant error and
+stays ~20mm. So it is the spatial variation, not the average error, that does
+the damage.
+
+**Learning a SCALAR against a field is destabilising — the Phase 4a ranking
+reverses.** In the constant world, replanning from a learned kappa was the safe
+best condition. Against the field, the learned-kappa and union triggers produce
+catastrophic off-map failures on `constrained_passage` (up to 130mm, via runaway
+replanning — one run fires 16 replans over a trajectory 3x normal length),
+because the scalar estimate chases the moving field and the kappa-change trigger
+fires endlessly. Drift-triggered re-aiming stays bounded, and FIXED closed-loop
+(no learning) is the most robust of all (worst 4.5mm) — so against a field,
+fixed >= learned-scalar, the opposite of Phase 4a. Feeding a scalar estimate of
+a spatial field into a model-triggered replanner is a hazard, and 4a's "union ==
+kappa-change" near-identity does not survive the field (another re-measure-after-
+the-setup-changes instance).
+
+**The highest-contrast layer is effectively unobservable, and process noise
+cannot fix it.** The 5mm capsule (R=15) gets ~1 position measurement per
+insertion (exactly 1 per seed on the clean `open` path), so the scalar estimate
+never resolves the capsule spike — it settles near the average, lags the field,
+and peaks ~30mm too deep. Sweeping the log-kappa process noise across three
+orders of magnitude changes the field-tracking error by essentially nothing (it
+floors at ~20%, what a fixed-at-average estimate gives); the binding constraint
+is OBSERVABILITY (position-only, intermittent, one capsule sample per
+insertion), not the filter's willingness to move. This directly constrains 4c:
+a single insertion carries almost no capsule evidence, so imaging must densify
+or many insertions must be pooled, and the model must widen its uncertainty
+where data is absent rather than confidently interpolate — which is the argument
+that motivates 4d. The bar 4c must clear is therefore fixed-closed-loop's ~3mm
+WITHOUT the runaway tail, not open-loop's ~20-26mm. Regenerable end to end by
+`scripts/four_c_baseline.py`.
+
 ## Falsifiable sub-claims to test later
 
 The classical comparison above is settled. These remain open — all on the
@@ -260,9 +309,16 @@ estimate back — rebuilding the planner from the learned kappa at each replan.
 Under constraint that beats a fixed wrong kappa mainly in the tail (worst seed
 16.1 → 6.1mm; median 4.4 → 3.0mm), and does no harm in the open. This is
 classical parameter estimation and the baseline for 4c's learned
-(position-dependent) kappa. **Not yet begun:** Phase 4c (learned deflection
-model / spatial kappa field, learned sampling). Note that
-with the EKF and closed loop, endpoint/estimate
-errors under mismatch are now genuine `true` vs `model` results, not
-one-shared-model artifacts; the planning "endpoint error" figures above remain
-single-model planning artifacts.
+(position-dependent) kappa. **Phase 4b (depth-dependent tissue field in the
+simulator) — complete** (`src/needlesim/models/tissue_field.py`), and its
+**4c baseline is now run:** against the field with a scalar belief of 1/29
+everywhere, open-loop degrades ~9x more than under a constant 2x mismatch on
+`open` (2.8 → 26.5mm), scalar learning becomes DESTABILISING (catastrophic
+off-map failures via runaway replanning, reversing 4a's fixed-vs-learned
+ranking), and the highest-contrast capsule layer is effectively unobservable
+(~1 measurement per insertion, unfixable by process noise) — see the section
+above. That is the number 4c must beat. **Not yet begun:** Phase 4c itself (the
+learned spatial kappa field / learned sampling). Note that with the EKF and
+closed loop, endpoint/estimate errors under mismatch are now genuine `true` vs
+`model` results, not one-shared-model artifacts; the planning "endpoint error"
+figures above remain single-model planning artifacts.

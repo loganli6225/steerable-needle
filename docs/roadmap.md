@@ -785,3 +785,100 @@ of decisions made in earlier phases; do not quietly drop them.
   observe. This joins the KD-tree "O(n) scans are the bottleneck" profiling
   assumption and the stale plain-kappa 3.1e-2 Jacobian figure as a third case of
   the same theme — re-measure after the thing being measured changes.
+- **Phase 4c baseline: the scalar-believing stack against the 4b field —
+  complete (this is the number 4c must beat, produced before any learned model
+  exists).** Nothing had been run against Phase 4b's `TissueField` except its
+  own integration tests. This run puts the field on the SIMULATOR
+  (`NeedleParams(kappa_field=PROSTATE_PATH)`) while the planner and both filters
+  keep a single scalar belief of 1/29 — the thickness-weighted mean of the four
+  layer radii over the 150mm workspace ((45*34+20*22+5*15+80*28)/150 = 28.6mm),
+  an uninformed clinician-style average prior, NOT a fitted value. That
+  varying-world / scalar-belief mismatch is exactly what 4c exists to close.
+
+  Harness/script only — no `planning/`, `models/`, `estimation/` or `control/`
+  logic touched. The field reaches ONLY the simulator, through the `true_params`
+  argument every run function already takes; `scripts/five_way_comparison.py`
+  gained a `World` toggle (`CONSTANT_WORLD` default, `FIELD_WORLD` opt-in — the
+  same switch the learned field will slot into), and everything is reconstructed
+  from the returned `executed_states`/`kappa_estimates`, which is why no module
+  needed changing. Verified: the constant-kappa path is BIT-IDENTICAL (only the
+  `===` header line differs, gaining `world=constant`; every numeric row is
+  byte-for-byte the recorded five-way); full suite green (164 passed); ruff /
+  black clean. Driver: `scripts/four_c_baseline.py`; figures
+  `docs/figures/four_c_baseline_{kappa_hat_vs_field,process_noise_sweep}.png`.
+
+  Both scenarios traverse all four layers (confirmed, not assumed — every layer
+  has measurements), so the "a scenario may sit in one layer" hazard did not
+  bite. The scaled scenarios were NOT used (the roadmap landmine: 4b's layers
+  are absolute-mm and would collapse at 500mm); this is all at 150mm.
+
+  **Headline — spatial structure hurts even when the average is right.**
+  Open-loop final error (the clean measure of the mismatch, no correction), as
+  medians over 5 seeds:
+
+  | scenario | constant world (2x mismatch) | field world (belief≈average) |
+  |---|---|---|
+  | `open` | 2.8mm | 26.5mm |
+  | `constrained_passage` | 18.6mm | 20.0mm |
+
+  On `open` the scalar stack lands 2.8mm off a 2x CONSTANT mismatch but ~26.5mm
+  off a FIELD of the same average curvature — ~9x worse, though the belief is
+  right on average. On `constrained` open-loop was already ~18mm under the
+  constant 2x error (that scenario needs precision), so the field adds little
+  there. So it is the SPATIAL structure, not the average error, that hurts.
+
+  **The finding I did not predict: learning a SCALAR against a field is
+  destabilising, and it reverses the Phase 4a ranking.** In the constant world
+  learn/kappa was the safe best condition (bounded tail). Against the field,
+  learn/kappa and learn/union produce CATASTROPHIC off-map failures on
+  `constrained` (seeds 2 and 4: 130.2 / 54.5mm and 130.2 / 130.1mm) via runaway
+  replanning — seed 4 union fires 16 replans with step indices reaching 1361
+  against a ~400-step normal insertion. Mechanism: the scalar estimate keeps
+  chasing the moving field as depth changes, so the kappa-change trigger fires
+  repeatedly, and occasionally a replan from a drifted pose returns a path that
+  drives the needle off the map (the runaway runs' final kappa is still
+  near-average ~1/24-27, so it is the repeated replanning, not a wild estimate).
+  What absorbs it: learn/drift stays bounded (worst 9.3mm) and FIXED
+  (drift-triggered re-aiming, no learning) is the most robust of all (worst
+  4.5mm; medians 3.0/3.0). So against a field, FIXED >= learned-scalar — the
+  opposite of 4a — and feeding a scalar estimate of a spatial field into a
+  kappa-change-triggered replanner is a hazard. Relatedly, 4a's "union ==
+  kappa-change in 9/10 runs" does NOT survive the field (constrained seed 4:
+  54.5 vs 130.1) — a fourth instance of the re-measure theme.
+
+  **The capsule — the highest-contrast layer — is effectively unobservable.**
+  Measured EKF-updates per layer (learn/kappa, summed over 5 seeds): on the
+  clean `open` path the 5mm capsule (R=15) gets EXACTLY 1 measurement per
+  insertion (fat 6 / muscle 4 / capsule 1 / gland 11-15 per seed); on
+  `constrained` ~1.6 (8 over 5 seeds, range 0-5). One measurement every ~5mm
+  against a 5mm layer, exactly the predicted arithmetic. The kappa-hat-vs-field
+  figure shows the consequence: the scalar estimate never resolves the capsule
+  spike at all, lags the field, and peaks ~30mm too deep in the gland at a much
+  lower amplitude — it settles near the average and cannot see the structure.
+
+  **Raising the log-kappa process noise does NOT rescue it — observability, not
+  responsiveness, is the binding constraint.** Sweeping `process_noise_std[3]`
+  over 1e-5 (the 4a converge-to-constant setting) → 1e-4 → 1e-3 → 1e-2, the
+  final error and the field-tracking error (mean absolute relative kappa error
+  vs the local field) are IDENTICAL across three orders of magnitude (the
+  1e-5/1e-4/1e-3 curves overplot exactly); only 1e-2 moves at all, and barely
+  (constrained field-track 21.5% → 19.3%, final 3.8 → 4.2mm; open essentially
+  flat). Field-tracking floors at ~20-21%, which is what a FIXED estimate pinned
+  at the average would give (fat ~17%, muscle ~24%, capsule ~48%, gland ~3%,
+  time-weighted ≈20%). Even 1e-2 misses the capsule entirely. So the
+  process-noise-only "fix" is necessary-but-insufficient — in this regime nearly
+  inert — because the constant-kappa estimator is starved of information (one
+  capsule sample per insertion, position-only, intermittent), not held back by
+  unwillingness to move. (The `[0,0,0,1]` log-kappa row stays correct under
+  tracking; only Q changed — no filter surgery, and none would have helped.)
+
+  **What this sets up for 4c.** The bar is not open-loop's ~20-26mm; it is
+  FIXED-closed-loop's ~3mm WITHOUT the runaway tail — a spatial model must clear
+  that while remaining safe to feed a kappa-triggered loop. The capsule is the
+  crux and is under-observed (~1 sample/insertion), which directly constrains
+  4c's data-source and model-class choices: a single insertion carries almost no
+  capsule evidence, so either imaging must densify or many insertions must be
+  pooled, and the model must widen its uncertainty where data is absent rather
+  than confidently interpolating. The instability result argues the learned
+  field should feed the PLANNER first; an adaptive loop around a spatial belief
+  needs care.
