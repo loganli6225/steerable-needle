@@ -106,6 +106,17 @@ of decisions made in earlier phases; do not quietly drop them.
 - **Estimation needs full state traces, not endpoints.** Phase 3 compares
   filters; that comparison needs per-step logs. Anything that discards
   intermediate states to save memory forecloses it.
+- **The tissue field's layer edges are in ABSOLUTE mm, and do not scale.**
+  `TissueField` (Phase 4b) places its layers at fixed depths (`y = 45..70` for
+  the prostate path) in a 150mm workspace. `scaled_scenarios.py` enlarges the
+  world ×10/3 while deliberately holding kappa (and n_steps_per_extend) fixed —
+  so if 4b/4c is ever run at the scaled (500mm) scale, those layers would
+  collapse into a thin band near the entry point and the field would be
+  geometric nonsense. This is a DECISION required before that combination, not
+  a bug to fix now: either scale the layer edges with the workspace (keeping
+  the field's relative structure) or keep them absolute (a shallow field in a
+  deep world) — whichever the experiment intends. Flagged here so it is not
+  discovered by a silently wrong run.
 
 ---
 

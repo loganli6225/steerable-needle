@@ -111,6 +111,20 @@ class NeedleEKF:
             initial: the filter's initial mean estimate (the known insertion
                 pose). Its uncertainty is config.initial_covariance_diag.
         """
+        # Phase 4b guard, pre-empting the 4c silent-degrade. This filter's
+        # `jacobian` hardcodes the theta row as [0, 0, 1] -- correct ONLY for
+        # constant kappa. If field-carrying params reach it, `predict`
+        # propagates the MEAN correctly through `step` (which is field-aware)
+        # while F stays [0, 0, 1] and is silently wrong: covariance and mean
+        # stop being consistent, nothing crashes, no structure test fires.
+        # Field-aware filtering (the new Jacobian terms) is 4c; until then a
+        # field must not reach a constant-kappa Jacobian. `true_params` may
+        # still carry a field -- that goes to the simulator, not here.
+        assert params.kappa_field is None, (
+            "NeedleEKF's Jacobian assumes constant kappa (theta row [0,0,1]); "
+            "field-carrying params would propagate the mean correctly through "
+            "step while F is silently wrong. Field-aware filtering is Phase 4c."
+        )
         self.params = params
         self.config = config
         self.rng = np.random.default_rng(config.seed)

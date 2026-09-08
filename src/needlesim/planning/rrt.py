@@ -216,7 +216,33 @@ class VanillaRRT(RRT):
 
 
 class KinodynamicRRT(RRT):
-    """Curvature-constrained RRT: extend respects the needle's kinematics."""
+    """Curvature-constrained RRT: extend respects the needle's kinematics.
+
+    FIELD-NATIVE (Phase 4b/4c). `extend` never builds arcs analytically -- it
+    rolls the Task 1 `step` forward through `self.params`. So if those params
+    ever carry a `kappa_field`, every edge follows the field with NO code
+    change and NO approximation: the needle curves at kappa(x, y) at each of
+    the n_steps_per_extend sub-steps, and is_arc_free checks that actual
+    field-curved arc. (At the default 20 steps over a 5mm edge the sub-step
+    spacing is 0.25mm, ~8x finer than the 2mm layer transitions -- fine.)
+
+    THE 4b CONVENTION, so the true/model split stays clean: in 4b the WORLD
+    (the simulator's true_params) gets the field; the planner and filters keep
+    SCALAR params, because they represent the model's belief and that belief is
+    deliberately wrong here -- a planner that already knew the field is what 4c
+    builds, and the gap is what 4c must close. There is deliberately no
+    assertion forbidding a field on planner params: in 4c handing the learned
+    field to this planner is the whole point, and it needs no change here.
+
+    CONTRAST with Dubins/RRT*: dubins_full computes R = 1/params.kappa and
+    builds constant-radius arcs, so a variable-curvature field cannot be
+    represented -- the executed controls no longer land on the geometric goal
+    pose, which destroys the exact pose-to-pose connection RRT* rewiring rests
+    on. That is a fourth independent reason the exact-connection planner is a
+    poor fit for this problem, consistent with the three already recorded in
+    docs/roadmap.md (can't connect at anatomical scale; dominated by the
+    turning-circle cost floor; cap-to-fix starves it).
+    """
 
     def extend(self, from_state: State, toward: State) -> tuple[State, Control] | None:
         """Pick the control that bends the needle MOST TOWARD `toward`: try

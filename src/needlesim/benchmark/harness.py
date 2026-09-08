@@ -206,6 +206,13 @@ def run_one(scenario, kind: str, planner_name: str, seed: int) -> RunRecord:
     fresh env is built per run so a baked SDF is never shared."""
     env = build_env(scenario)
     params = NeedleParams(kappa=KAPPA)
+    # This benchmark is DELIBERATELY homogeneous-tissue: one scalar-kappa model
+    # builds every tree AND executes every metric rollout (see "ONE MODEL FOR
+    # ALL METRICS" above). A kappa_field leaking in would silently shift every
+    # recorded number -- the model executing plans would no longer be the one
+    # the CSV numbers were recorded under. Phase 4b's spatial field belongs to
+    # the true/model estimation experiments, not to this classical benchmark.
+    assert params.kappa_field is None, "benchmark must stay homogeneous-tissue"
     cfg = make_config(seed)
     planner = PLANNERS[planner_name](env, params, cfg)
 

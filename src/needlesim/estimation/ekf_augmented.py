@@ -181,6 +181,16 @@ class AugmentedNeedleEKF:
         """
         self.config = config
         self.rng = np.random.default_rng(config.seed)
+        # Phase 4b guard, by CONSTRUCTION rather than assertion. The plain
+        # NeedleEKF asserts params.kappa_field is None because it accepts a
+        # NeedleParams that could carry a field. This filter cannot: its belief
+        # is `initial_kappa` (a float) held as the scalar log-kappa state
+        # mean[3], and the only NeedleParams it ever builds is the `params`
+        # property below -- NeedleParams(kappa=self.kappa), which never sets a
+        # field. So a field cannot silently reach this 4x4 constant-kappa
+        # Jacobian (its fourth column reads exp(mean[3]), a scalar). A field
+        # true_params in run_augmented_estimation is fine -- it drives the
+        # SIMULATOR, not the filter. Making this filter field-aware is 4c.
         # mean = [x, y, theta, log(kappa)]; covariance from the config
         # diagonal SQUARED (config stores standard deviations, covariance
         # needs variances).

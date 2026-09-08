@@ -55,8 +55,12 @@ IMPLEMENTATION NOTES:
 from __future__ import annotations
 
 from dataclasses import dataclass
+from typing import TYPE_CHECKING
 
 import numpy as np
+
+if TYPE_CHECKING:
+    from needlesim.models.tissue_field import TissueField
 
 
 @dataclass(frozen=True)
@@ -69,6 +73,29 @@ class NeedleParams:
     """
 
     kappa: float = 1.0 / 50.0  # natural curvature [1/mm], ~1/50 is typical
+
+    # Phase 4b: an optional spatially varying curvature field. When None
+    # (the default), `_time_deriv` uses the scalar `kappa` exactly as before,
+    # so every existing call site is unchanged. When set, `_time_deriv` reads
+    # kappa_field.kappa_at(x, y) at each RK4 sub-evaluation instead.
+    #
+    # WHY THE FIELD LIVES ON params (option (a), not a separate step_field or
+    # an always-callable kappa): every field-relevant consumer already routes
+    # through `step` -- the simulator, the collision checker
+    # (GridEnvironment.is_arc_free), the KinodynamicRRT rollout, and the
+    # filters' mean-propagation all call step(state, control, dt, params). So
+    # attaching the field to `params` propagates it to all of them for free,
+    # through code that already exists. A separate step_field would need a
+    # branch at every one of those call sites and two code paths in
+    # is_arc_free; making `kappa` always-callable would break every
+    # `R = 1/params.kappa` in the Dubins tree while only MOVING the
+    # scalar-sampling problem the geometry has, not removing it.
+    #
+    # The scalar `kappa` is KEPT as the fallback and as "the" curvature a
+    # field-carrying params still reports when a scalar is asked for -- it is
+    # what the planner and filters legitimately consume (see the true/model
+    # split: in 4b the world gets a field, the belief stays scalar).
+    kappa_field: TissueField | None = None
     # Room to grow: process_noise_std, tissue_inhomogeneity, etc.
 
 
@@ -96,7 +123,16 @@ def _time_deriv(
     x, y, theta = current_state
     x_dot = control.v * np.cos(theta)
     y_dot = control.v * np.sin(theta)
-    theta_dot = control.v * params.kappa * control.b
+    # Phase 4b: with a field, curvature depends on position, so it is read at
+    # THIS sub-evaluation's (x, y) -- which is why RK4 (k1..k4 at different
+    # points) matters once kappa varies, exactly as the module docstring
+    # anticipated. With no field this is bit-identical to `params.kappa`.
+    kappa = (
+        params.kappa
+        if params.kappa_field is None
+        else params.kappa_field.kappa_at(x, y)
+    )
+    theta_dot = control.v * kappa * control.b
     return np.array([x_dot, y_dot, theta_dot])
 
 

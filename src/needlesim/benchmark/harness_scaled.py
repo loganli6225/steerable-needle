@@ -157,6 +157,11 @@ def run_one(scenario, planner_name: str, seed: int) -> RunRecord:
     RRT pair uses the primary metrics, RRTStar the adapters above."""
     env = build_env(scenario)
     params = NeedleParams(kappa=KAPPA)
+    # Deliberately homogeneous-tissue, exactly as the primary harness: one
+    # scalar-kappa model builds every tree and executes every metric rollout.
+    # A kappa_field here would silently shift every recorded number against the
+    # committed results; Phase 4b's spatial field is not part of this benchmark.
+    assert params.kappa_field is None, "benchmark must stay homogeneous-tissue"
 
     t0 = time.perf_counter()
     if planner_name == "RRTStar":
