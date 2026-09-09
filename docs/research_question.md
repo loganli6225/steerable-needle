@@ -260,6 +260,38 @@ that motivates 4d. The bar 4c must clear is therefore fixed-closed-loop's ~3mm
 WITHOUT the runaway tail, not open-loop's ~20-26mm. Regenerable end to end by
 `scripts/four_c_baseline.py`.
 
+**Step 0 (oracle-field headroom): even a perfect field wins large, so 4c is
+worth building — and the win is fidelity/tracking.** Before collecting any data,
+the KNOWN field was put into the planner (no learning, served through a lookup
+table) to test whether even a perfect model beats the scalar baseline; if it
+could not, the scenarios or metrics would be the problem, not the learning. It
+does, decisively, on the non-saturated metrics: open-loop endpoint error falls
+from 20-26mm to ~3mm on every seed (the baseline is uncensored at 20-26mm, so
+the gap is real, not the `goal_tolerance=3.0` floor); the baseline collides with
+the wall on 3/5 `constrained` seeds and leaves the workspace on 2/5 `open`
+seeds while the oracle does neither; and even in the censored closed loop the
+oracle needs 0 replans vs 8-9. The confound (a field-believing planner plans
+differently, not just tracks better) resolves toward tracking: the plans are
+near-identical in geometry but plan-to-execution deviation is 0.1mm for the
+oracle vs 4-13mm mean for the baseline. So the learned field's job is fidelity,
+and its value is cleanly visible OPEN-LOOP, where feedback does not mask it.
+
+**The capsule carries most of that value where a structure sits past it, and
+endpoint vs collision decouple.** An ablation (planner field correct everywhere
+except the capsule, and its mirror) shows the capsule is 56% of the open-loop
+win on `constrained` — 9.6mm of a 17.1mm win, and blanking it reintroduces a
+wall collision — but only 13% on `open`, the difference being mechanistic
+(`constrained`'s capsule at y65-70 sits directly under the wall at y72-78;
+`open`'s path runs far from its obstacle). So knowing the capsule is a small
+share in `open` does NOT make the observation problem benign: where the capsule
+is decision-relevant it is load-bearing. The mirror also exposed a decoupling —
+knowing only the capsule recovers 14 of 17mm of endpoint but still collides 3/5,
+while knowing everything but the capsule has worse endpoint (12.6mm) but only
+1/5 collisions: the capsule owns terminal accuracy (last high-contrast layer
+before the goal), the peri-wall layers own collision avoidance, and their
+effects interact (the two ablation directions, 9.6 and 14.0mm, disagree and do
+not sum to the oracle win). Regenerable by `scripts/four_c_oracle_headroom.py`.
+
 ## Falsifiable sub-claims to test later
 
 The classical comparison above is settled. These remain open — all on the
@@ -317,8 +349,13 @@ everywhere, open-loop degrades ~9x more than under a constant 2x mismatch on
 off-map failures via runaway replanning, reversing 4a's fixed-vs-learned
 ranking), and the highest-contrast capsule layer is effectively unobservable
 (~1 measurement per insertion, unfixable by process noise) — see the section
-above. That is the number 4c must beat. **Not yet begun:** Phase 4c itself (the
-learned spatial kappa field / learned sampling). Note that with the EKF and
+above. That is the number 4c must beat. **Step 0 (oracle-field headroom) is also
+measured:** even a perfect field, put into the planner, wins large on the
+non-saturated metrics (open-loop endpoint 20-26 → ~3mm, collisions and
+out-of-bounds eliminated), so 4c is worth building; the win is model fidelity →
+tracking, and an ablation shows the under-observed capsule carries 56% of that
+win where a critical structure sits past it (13% where it does not). **Not yet
+begun:** Phase 4c itself (the learned spatial kappa field / learned sampling). Note that with the EKF and
 closed loop, endpoint/estimate errors under mismatch are now genuine `true` vs
 `model` results, not one-shared-model artifacts; the planning "endpoint error"
 figures above remain single-model planning artifacts.
