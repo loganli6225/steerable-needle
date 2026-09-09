@@ -1,50 +1,61 @@
-"""Phase 4c step 0: oracle-field headroom check.
+"""Phase 4c step 0: oracle-field headroom check + capsule ablation.
 
-The question this answers is whether 4c is worth building AT ALL. Put the KNOWN
-field into the planner -- no learning, no fitting -- and see whether even a
-perfect model beats the scalar baseline. If the oracle cannot win on any
+The question step 0 answers is whether 4c is worth building AT ALL. Put the
+KNOWN field into the planner -- no learning, no fitting -- and see whether even
+a perfect model beats the scalar baseline. If the oracle cannot win on any
 non-saturated metric, the scenarios or the metrics are the problem, and no
-amount of learning fixes that. Better to know for the price of this script than
-after a full collect-and-fit cycle.
+amount of learning fixes that.
 
 WHY THE OBVIOUS METRIC IS A TRAP. goal_tolerance = 3.0, and both closed loops
 terminate the instant hypot(tip, goal) < 3.0, so every successful run is
-censored into [0, 3) and reports ~3.0. The field-world `fixed` numbers are
-measuring that the loop STOPPED, not how well the model tracks. A perfect field
-cannot beat the tolerance floor there, so measuring the field's value on
-closed-loop endpoint error risks a FALSE NEGATIVE. Hence the headline is
-OPEN-LOOP endpoint error (no drift crutch, so the model's contribution is
-visible and attributable), with closed-loop reported alongside AND labelled
-censored.
+censored into [0, 3) and reports ~3.0. A perfect field cannot beat the
+tolerance floor there, so measuring the field's value on closed-loop endpoint
+risks a FALSE NEGATIVE. Hence the headline is OPEN-LOOP endpoint error (no
+drift crutch, so the model's contribution is visible and attributable), plus
+the non-saturated feasibility metric (collision / out-of-bounds), with
+closed-loop reported alongside AND labelled censored.
 
-CONDITIONS (world is always the real field; filters always scalar):
-    B  baseline  -- planner believes a scalar 1/29 (kappa_field=None)
-    A  oracle    -- planner believes the field, served through a LOOKUP TABLE
-                    (kappa=1/29, kappa_field=LookupField(TissueField))
+CONDITIONS (world is always the real field; filters always scalar). Each is a
+planner belief, served through a lookup table (the plumbing 4c reuses):
+    B  scalar          -- kappa 1/29 everywhere (kappa_field=None); the baseline
+    A  oracle          -- the true field everywhere; the ceiling
+    C  capsule-blanked -- true field EXCEPT the capsule held at 1/29. Isolates
+                          the COST of not knowing the capsule given you know
+                          everything else -- i.e. the realistic 4c failure mode,
+                          because the 5mm capsule is the one under-observed layer
+                          (~1 measurement per insertion). A vs C is the headline
+                          ablation; C vs B is how much of the oracle win survives
+                          WITHOUT the capsule.
+    D  capsule-only    -- 1/29 everywhere EXCEPT the true capsule. The mirror:
+                          the GAIN from knowing only the capsule. (A-C) and
+                          (D-B) do not sum to the oracle gap -- the difference is
+                          layer interaction, which is why both bounds are run.
+
+INTERPRETATION GUARDRAILS (from the plan review):
+  - Judge the capsule's share on FEASIBILITY (collisions / OOB), not just
+    endpoint mm: a small mm-share can still be the whole difference between a
+    collision and a clear pass, and the collision is the clinically relevant
+    outcome. So the verdict is "does blanking the capsule REINTRODUCE the
+    collisions the full oracle avoided", not "how many mm does it restore".
+  - Report per-scenario, never pooled. The capsule's share is scenario-
+    dependent -- in constrained_passage the capsule (y65-70) sits directly below
+    the critical wall (y72-78), so expect a large share there.
+  - Treat the measured share as a LOWER bound on the capsule's importance: these
+    scenarios were designed pre-field, and a capsule-decision-relevant held-out
+    test (step 1) would stress it more. A large share here is decisive (must
+    solve capsule observation); a small share here is weak evidence to relax.
 
 The planner change is a NeedleParams construction, nothing else: KinodynamicRRT
-is field-native (extend rolls `step` forward through self.params, and
-is_arc_free does the same), and nothing in its path reads params.kappa as a
-scalar -- verified by grep before writing this (the only 1/params.kappa reads
-are in dubins.py / RRT*, and kappa=0.0 is VanillaRRT's straight-line
-integrator). The NeedleEKF guard stays satisfied because the filter is handed
-scalar model_params, not the field.
-
-THE CONFOUND (flagged in the plan review): a field-believing planner does not
-merely track better, it PLANS differently -- it believes R=15 in the capsule
-(more manoeuvrable) and R=34 in fat (less), so it can return a different path
-before any execution. So a difference between A and B could be a different plan
-rather than better tracking. This separates the two: plan geometry (length,
-node count, whether the paths differ) vs plan-to-execution deviation (the
-tracking question proper). Open-loop is where that separation is clean, because
-execution is blind -- no replanning muddies which plan is being followed.
+is field-native (extend and is_arc_free roll `step` forward through
+self.params), and nothing in its path reads params.kappa as a scalar. The
+NeedleEKF guard stays satisfied because the filter is handed scalar
+model_params, not the field.
 
 Run:  python scripts/four_c_oracle_headroom.py
 """
 
 from __future__ import annotations
 
-import math
 import statistics
 
 import numpy as np
@@ -57,13 +68,14 @@ from needlesim.control.closed_loop import (
     run_open_loop,
 )
 from needlesim.estimation.ekf import EKFConfig
-from needlesim.models.tissue_field import TissueField
+from needlesim.models.tissue_field import TissueField, TissueLayer
 from needlesim.models.unicycle_needle import NeedleParams, State
 from needlesim.planning.rrt import KinodynamicRRT, RRTConfig
 
 BELIEF = 1 / 29  # the scalar belief (thickness-weighted mean R over 150mm)
 SEEDS = range(1, 6)
 SCENARIOS = (CONSTRAINED_PASSAGE, OPEN)
+CAPSULE = "capsule"
 
 
 # --- the lookup-table field (the plumbing the learned field will reuse) ------
@@ -74,16 +86,11 @@ class LookupField:
     call. Duck-types TissueField.kappa_at so it drops into
     NeedleParams.kappa_field and is consumed by `step` with no other change.
 
-    Built here from the true TissueField; in 4c the same class wraps the
-    learned field. `step` calls kappa_at thousands of times per plan and the
-    real kappa_at does several math.exp per call, so tabulating once and
-    interpolating keeps the model off the RK4 hot path. Values off the grid
-    ends are clamped to the nearest tabulated value (the grid spans well beyond
-    the workspace, so this only matters far outside it).
-
-    A plain class, not a dataclass: it must stay hashable-by-identity so a
-    frozen NeedleParams carrying it can still hash (a dataclass over the value
-    array would not)."""
+    `step` calls kappa_at thousands of times per plan and the real kappa_at does
+    several math.exp per call, so tabulating once and interpolating keeps the
+    model off the RK4 hot path. Off-grid ends clamp to the nearest node (the
+    grid spans well beyond the workspace). A plain class, not a dataclass, so it
+    stays hashable-by-identity -- a frozen NeedleParams carrying it must hash."""
 
     def __init__(self, source, y_min: float, y_max: float, spacing: float) -> None:
         n = int(round((y_max - y_min) / spacing)) + 1
@@ -106,22 +113,50 @@ class LookupField:
         return self._ks[i] * (1.0 - f) + self._ks[i + 1] * f
 
 
-def verify_lookup(lut: LookupField, source: TissueField) -> float:
+def verify_lookup(lut: LookupField, source) -> float:
     """Max abs error of the lookup vs the real kappa_at, sampled DENSELY and
-    OFF-GRID (0.013mm step, coprime-ish with the 0.02mm grid so samples do not
-    land on nodes) across the whole insertion range. Returns the max error."""
+    OFF-GRID (0.013mm step, coprime-ish with the 0.02mm grid) across the whole
+    insertion range."""
     ys = np.arange(0.0, 150.0, 0.013)
     return max(
         abs(lut.kappa_at(0.0, float(y)) - source.kappa_at(0.0, float(y))) for y in ys
     )
 
 
+# --- the ablated fields -----------------------------------------------------
+
+
+def with_layer_kappa(field: TissueField, layer_name: str, kappa: float) -> TissueField:
+    """Copy `field` with one named layer's kappa replaced. Everything else
+    (edges, transition width, the other layers) is left true."""
+    layers = tuple(
+        TissueLayer(
+            kappa if lyr.name == layer_name else lyr.kappa, lyr.upper_edge_mm, lyr.name
+        )
+        for lyr in field.layers
+    )
+    return TissueField(layers=layers, transition_mm=field.transition_mm)
+
+
+def all_but_layer_kappa(
+    field: TissueField, layer_name: str, kappa: float
+) -> TissueField:
+    """Copy `field` with EVERY layer's kappa replaced by `kappa` EXCEPT the
+    named one, which keeps its true value. The mirror of with_layer_kappa."""
+    layers = tuple(
+        TissueLayer(
+            lyr.kappa if lyr.name == layer_name else kappa, lyr.upper_edge_mm, lyr.name
+        )
+        for lyr in field.layers
+    )
+    return TissueField(layers=layers, transition_mm=field.transition_mm)
+
+
 # --- planners / metrics -----------------------------------------------------
 
 
 def make_planner(env, params: NeedleParams, seed: int) -> KinodynamicRRT:
-    """Same config as the baseline five-way; only `params` differs between the
-    scalar (B) and field (A) conditions."""
+    """Same config as the baseline five-way; only `params` differs by condition."""
     cfg = RRTConfig(
         max_iterations=20000,
         goal_tolerance=3.0,
@@ -133,17 +168,12 @@ def make_planner(env, params: NeedleParams, seed: int) -> KinodynamicRRT:
     return KinodynamicRRT(env, params, cfg)
 
 
-def path_length(path: list[State]) -> float:
-    return sum(math.hypot(b.x - a.x, b.y - a.y) for a, b in zip(path, path[1:]))
-
-
-def plan_vs_exec(executed: list[State], plan: list[State]) -> tuple[float, float]:
-    """Mean and max cross-track deviation of the executed trajectory from the
-    planned polyline -- the tracking question proper."""
+def plan_vs_exec_max(executed: list[State], plan: list[State]) -> float:
+    """Max cross-track deviation of the executed trajectory from the planned
+    polyline -- the tracking question proper."""
     if not executed or len(plan) < 2:
-        return (float("nan"), float("nan"))
-    devs = [crosstrack_distance(s, plan) for s in executed]
-    return (statistics.mean(devs), max(devs))
+        return float("nan")
+    return max(crosstrack_distance(s, plan) for s in executed)
 
 
 # --- the run ----------------------------------------------------------------
@@ -151,141 +181,151 @@ def plan_vs_exec(executed: list[State], plan: list[State]) -> tuple[float, float
 
 def main():
     world_field = TissueField()  # the SIMULATOR's field -- real kappa_at
-    lut = LookupField(world_field, y_min=-10.0, y_max=160.0, spacing=0.02)
-    lut_err = verify_lookup(lut, world_field)
-    print(
-        f"Lookup table: {len(lut._ks)} nodes over y=[-10,160] @ 0.02mm; "
-        f"max abs error vs kappa_at = {lut_err:.2e} 1/mm "
-        f"(field kappa spans {min(lut._ks):.4f}-{max(lut._ks):.4f})."
-    )
-    if lut_err > 1e-4:
-        print("  WARNING: lookup error exceeds 1e-4; refine the grid.")
-
     scalar_params = NeedleParams(kappa=BELIEF)
-    field_params = NeedleParams(kappa=BELIEF, kappa_field=lut)
+
+    def field_params(source) -> NeedleParams:
+        lut = LookupField(source, y_min=-10.0, y_max=160.0, spacing=0.02)
+        err = verify_lookup(lut, source)
+        if err > 1e-4:
+            raise SystemExit(f"lookup error {err:.2e} exceeds 1e-4; refine grid")
+        return NeedleParams(kappa=BELIEF, kappa_field=lut), err
+
+    oracle_p, oracle_err = field_params(world_field)
+    blanked_p, blanked_err = field_params(
+        with_layer_kappa(world_field, CAPSULE, BELIEF)
+    )
+    only_p, only_err = field_params(all_but_layer_kappa(world_field, CAPSULE, BELIEF))
+    print(
+        "Lookup tables @ 0.02mm, max abs error vs kappa_at: "
+        f"oracle {oracle_err:.1e}, capsule-blanked {blanked_err:.1e}, "
+        f"capsule-only {only_err:.1e} (all << 1e-4)."
+    )
+
+    # Order matters only for display; each run is deterministic from its own
+    # seed+params+env, so B and A reproduce the step-0 numbers regardless.
+    conditions = [
+        ("B scalar", scalar_params),
+        ("A oracle", oracle_p),
+        ("C caps-blank", blanked_p),
+        ("D caps-only", only_p),
+    ]
+
     true_params = NeedleParams(kappa=BELIEF, kappa_field=world_field)
 
-    # collected[(scenario, seed)] = dict of the four runs
+    # collected[(scenario, seed, label)] = {"open": result, "closed": result}
     collected = {}
     for scenario in SCENARIOS:
         for seed in SEEDS:
             sg = dict(start=scenario.start, goal=scenario.goal)
+            for label, params in conditions:
+                env = build_env(scenario)
+                r_open = run_open_loop(
+                    make_planner(env, params, seed),
+                    env,
+                    true_params,
+                    scalar_params,
+                    **sg,
+                )
+                env = build_env(scenario)
+                r_closed = run_closed_loop(
+                    make_planner(env, params, seed),
+                    env,
+                    true_params,
+                    scalar_params,
+                    ekf_config=EKFConfig(seed=seed),
+                    loop_config=ClosedLoopConfig(seed=seed),
+                    **sg,
+                )
+                collected[(scenario.name, seed, label)] = {
+                    "open": r_open,
+                    "closed": r_closed,
+                }
 
-            env = build_env(scenario)
-            b_open = run_open_loop(
-                make_planner(env, scalar_params, seed),
-                env,
-                true_params,
-                scalar_params,
-                **sg,
-            )
-            env = build_env(scenario)
-            a_open = run_open_loop(
-                make_planner(env, field_params, seed),
-                env,
-                true_params,
-                scalar_params,
-                **sg,
-            )
-            env = build_env(scenario)
-            b_closed = run_closed_loop(
-                make_planner(env, scalar_params, seed),
-                env,
-                true_params,
-                scalar_params,
-                ekf_config=EKFConfig(seed=seed),
-                loop_config=ClosedLoopConfig(seed=seed),
-                **sg,
-            )
-            env = build_env(scenario)
-            a_closed = run_closed_loop(
-                make_planner(env, field_params, seed),
-                env,
-                true_params,
-                scalar_params,
-                ekf_config=EKFConfig(seed=seed),
-                loop_config=ClosedLoopConfig(seed=seed),
-                **sg,
-            )
-            collected[(scenario.name, seed)] = dict(
-                b_open=b_open, a_open=a_open, b_closed=b_closed, a_closed=a_closed
-            )
-
-    _report(collected)
+    _report(collected, [lbl for lbl, _ in conditions])
 
 
-def _fmt_flags(r) -> str:
-    return f"{'COLLIDE' if r.collided else 'clear':>7} {'OOB' if r.left_bounds else 'in':>3}"
-
-
-def _report(collected):
+def _report(collected, labels):
     for scenario in SCENARIOS:
         name = scenario.name
-        rows = [collected[(name, s)] for s in SEEDS]
+        print(f"\n\n{'#' * 30} {name} {'#' * 30}")
 
-        print(f"\n\n########## {name} ##########")
+        def col(seed, label, loop, attr):
+            return getattr(collected[(name, seed, label)][loop], attr)
 
-        # 1. OPEN-LOOP ENDPOINT -- the headline, NOT censored for B.
-        print("\n--- 1. OPEN-LOOP endpoint error [mm] (HEADLINE; uncensored for B) ---")
-        print(f"{'seed':>5} {'B scalar':>9} {'A oracle':>9} {'improvement':>12}")
-        bo, ao = [], []
-        for s, r in zip(SEEDS, rows):
-            b = r["b_open"].final_error_mm
-            a = r["a_open"].final_error_mm
-            bo.append(b)
-            ao.append(a)
-            print(f"{s:>5} {b:>9.1f} {a:>9.1f} {b - a:>11.1f}")
+        # 1. OPEN-LOOP endpoint per condition, per seed.
+        print("\n--- 1. OPEN-LOOP endpoint error [mm] per condition ---")
+        print("seed " + "".join(f"{lbl:>13}" for lbl in labels))
+        med = {}
+        for seed in SEEDS:
+            vals = [col(seed, lbl, "open", "final_error_mm") for lbl in labels]
+            print(f"{seed:>4} " + "".join(f"{v:>13.1f}" for v in vals))
         print(
-            f"{'median':>5} {statistics.median(bo):>9.1f} "
-            f"{statistics.median(ao):>9.1f} "
-            f"{statistics.median(bo) - statistics.median(ao):>11.1f}"
-        )
-
-        # 2. OPEN-LOOP feasibility -- non-saturated, capsule-relevant.
-        print("\n--- 2. OPEN-LOOP feasibility (collision / out-of-bounds) ---")
-        print(f"{'seed':>5} {'B scalar':>15} {'A oracle':>15}")
-        for s, r in zip(SEEDS, rows):
-            print(f"{s:>5} {_fmt_flags(r['b_open']):>15} {_fmt_flags(r['a_open']):>15}")
-
-        # 3. CLOSED-LOOP endpoint -- CENSORED at goal_tolerance; read replans.
-        print("\n--- 3. CLOSED-LOOP endpoint [mm] (CENSORED at 3.0; read replans) ---")
-        print(
-            f"{'seed':>5} {'B err':>7} {'A err':>7} {'B repl':>7} {'A repl':>7} "
-            f"{'B reason':>16} {'A reason':>16}"
-        )
-        b_repl, a_repl = [], []
-        for s, r in zip(SEEDS, rows):
-            b, a = r["b_closed"], r["a_closed"]
-            b_repl.append(len(b.replan_steps))
-            a_repl.append(len(a.replan_steps))
-            print(
-                f"{s:>5} {b.final_error_mm:>7.1f} {a.final_error_mm:>7.1f} "
-                f"{len(b.replan_steps):>7} {len(a.replan_steps):>7} "
-                f"{b.termination_reason:>16} {a.termination_reason:>16}"
+            "med  "
+            + "".join(
+                f"{statistics.median([col(s, lbl, 'open', 'final_error_mm') for s in SEEDS]):>13.1f}"
+                for lbl in labels
             )
-        print(
-            f"{'total':>5} {'':>7} {'':>7} {sum(b_repl):>7} {sum(a_repl):>7} "
-            f"{'replans':>16}"
         )
-
-        # 4. CONFOUND -- planning vs tracking (open-loop).
-        print("\n--- 4. CONFOUND: planning vs tracking (open-loop) ---")
-        print(
-            f"{'seed':>5} {'B len':>7} {'A len':>7} {'B nds':>6} {'A nds':>6} "
-            f"{'differ?':>8} {'B dev mean/max':>16} {'A dev mean/max':>16}"
-        )
-        for s, r in zip(SEEDS, rows):
-            bp = r["b_open"].plans[0]
-            ap = r["a_open"].plans[0]
-            blen, alen = path_length(bp), path_length(ap)
-            differ = abs(blen - alen) > 1.0 or len(bp) != len(ap)
-            bdm, bdx = plan_vs_exec(r["b_open"].executed_states, bp)
-            adm, adx = plan_vs_exec(r["a_open"].executed_states, ap)
-            print(
-                f"{s:>5} {blen:>7.1f} {alen:>7.1f} {len(bp):>6} {len(ap):>6} "
-                f"{('yes' if differ else 'no'):>8} "
-                f"{bdm:>7.1f}/{bdx:<8.1f} {adm:>7.1f}/{adx:<8.1f}"
+        for lbl in labels:
+            med[lbl] = statistics.median(
+                [col(s, lbl, "open", "final_error_mm") for s in SEEDS]
             )
+
+        # 2. FEASIBILITY per condition (the decision metric) -- open AND closed.
+        print("\n--- 2. FEASIBILITY over 5 seeds (collisions / out-of-bounds) ---")
+        print(
+            f"{'condition':>13} {'open coll':>10} {'open OOB':>9} "
+            f"{'closed coll':>12} {'closed OOB':>11}"
+        )
+        for lbl in labels:
+            oc = sum(col(s, lbl, "open", "collided") for s in SEEDS)
+            oo = sum(col(s, lbl, "open", "left_bounds") for s in SEEDS)
+            cc = sum(col(s, lbl, "closed", "collided") for s in SEEDS)
+            co = sum(col(s, lbl, "closed", "left_bounds") for s in SEEDS)
+            print(f"{lbl:>13} {oc:>8}/5 {oo:>7}/5 {cc:>10}/5 {co:>9}/5")
+
+        # 3. TRACKING (open-loop plan-vs-exec max dev, median over seeds) and
+        #    CLOSED-LOOP replans (censored endpoint, so read the replans).
+        print("\n--- 3. TRACKING (open dev max, median) & CLOSED-LOOP replans ---")
+        print(f"{'condition':>13} {'open devmax':>12} {'closed replans (total)':>24}")
+        for lbl in labels:
+            devs = [
+                plan_vs_exec_max(
+                    collected[(name, s, lbl)]["open"].executed_states,
+                    collected[(name, s, lbl)]["open"].plans[0],
+                )
+                for s in SEEDS
+            ]
+            repl = sum(len(col(s, lbl, "closed", "replan_steps")) for s in SEEDS)
+            print(f"{lbl:>13} {statistics.median(devs):>11.1f} {repl:>24}")
+
+        # 4. THE ABLATION VERDICT.
+        b, a, c, d = (
+            med["B scalar"],
+            med["A oracle"],
+            med["C caps-blank"],
+            med["D caps-only"],
+        )
+        oracle_win = b - a
+        retained = b - c
+        capsule_cost = c - a
+        a_coll = sum(col(s, "A oracle", "open", "collided") for s in SEEDS)
+        a_oob = sum(col(s, "A oracle", "open", "left_bounds") for s in SEEDS)
+        c_coll = sum(col(s, "C caps-blank", "open", "collided") for s in SEEDS)
+        c_oob = sum(col(s, "C caps-blank", "open", "left_bounds") for s in SEEDS)
+        frac = retained / oracle_win if oracle_win > 1e-9 else float("nan")
+        print("\n--- 4. CAPSULE ABLATION VERDICT (open-loop medians, mm) ---")
+        print(f"  oracle win over baseline (B-A)      : {oracle_win:6.1f}")
+        print(
+            f"  win retained WITHOUT capsule (B-C)  : {retained:6.1f}  ({frac * 100:.0f}%)"
+        )
+        print(f"  extra error from blanking capsule (C-A): {capsule_cost:6.1f}")
+        print(f"  capsule-only gain (B-D)             : {b - d:6.1f}")
+        print(
+            f"  feasibility: full oracle {a_coll}/5 coll {a_oob}/5 OOB; "
+            f"capsule-blanked {c_coll}/5 coll {c_oob}/5 OOB "
+            f"-> blanking {'REINTRODUCES' if (c_coll > a_coll or c_oob > a_oob) else 'does NOT reintroduce'} failures"
+        )
 
 
 if __name__ == "__main__":
