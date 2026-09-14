@@ -292,6 +292,32 @@ before the goal), the peri-wall layers own collision avoidance, and their
 effects interact (the two ablation directions, 9.6 and 14.0mm, disagree and do
 not sum to the oracle win). Regenerable by `scripts/four_c_oracle_headroom.py`.
 
+**Step 1 (two synthetic pre-collection gates): a QUALIFIED go — the information
+to learn kappa(y) is present from characterization-grade paths, but the safe
+fail-over's uncertainty is not free.** Before collecting anything, two gates use
+the KNOWN field as ground truth (`scripts/four_c_gates.py`) to ask whether the
+information exists to be learned and whether the realistic rate resolves the
+crux capsule. Both GENERATE and INVERT with matching assumptions (the inverse
+crime), so every verdict is labelled — in the script's own output, not just here
+— "information present under a MATCHED MODEL", NOT a claim that 4c works;
+robustness to misspecification is a REQUIRED, deliberately-held Gate 3 (recorded
+in `docs/roadmap.md` with the specific departures to test). Gate 1
+(identifiability, judged on held-out-shape prediction at matched kappa(y)/kappa(s)
+capacity): template-like near-parallel paths do NOT separate kappa(y) from
+kappa(arc-length) (held-out gap ~the noise floor), while a wide heading fan and
+especially depth-revisiting arcs DO — confirming the separation needs the
+control diversity only a characterization protocol (phantom/ex-vivo, free
+controls) supplies, which is why that framing was adopted. Gate 2 (capsule
+recovery at the realistic interval=20, phase-diverse pooling): the capsule MEAN
+recovers at every pool size, but the Laplace posterior's ±1σ BAND is never
+honestly calibrated — over-wide at small N, progressively OVERCONFIDENT as N
+grows (in-capsule coverage collapses to 0 by N=80). interval=5 gives the same
+mean and the same broken band, so this is the LINEARISED INVERSION's
+overconfidence, not an observability wall — which is why the rate must not be
+raised to force it. The revert-to-prior fail-safe therefore cannot trust that
+posterior's variance as-is; producing an honest capsule uncertainty is now a
+named step-2 problem rather than a deployment surprise.
+
 ## Falsifiable sub-claims to test later
 
 The classical comparison above is settled. These remain open — all on the
@@ -354,8 +380,17 @@ measured:** even a perfect field, put into the planner, wins large on the
 non-saturated metrics (open-loop endpoint 20-26 → ~3mm, collisions and
 out-of-bounds eliminated), so 4c is worth building; the win is model fidelity →
 tracking, and an ablation shows the under-observed capsule carries 56% of that
-win where a critical structure sits past it (13% where it does not). **Not yet
-begun:** Phase 4c itself (the learned spatial kappa field / learned sampling). Note that with the EKF and
-closed loop, endpoint/estimate errors under mismatch are now genuine `true` vs
-`model` results, not one-shared-model artifacts; the planning "endpoint error"
-figures above remain single-model planning artifacts.
+win where a critical structure sits past it (13% where it does not). **Step 1
+(two synthetic pre-collection gates) is a QUALIFIED go:** the information to
+learn kappa(y) IS present from characterization-grade paths (gate 1 separates
+kappa(y) from kappa(arc-length) only with wide-fan / depth-revisiting arcs, not
+template-parallel ones) and the capsule MEAN recovers at the realistic rate
+(gate 2), so 4c is worth building — but the Laplace posterior's capsule VARIANCE
+is not honestly calibrated (overconfident as the pool grows, unfixed by a higher
+rate), so the revert-to-prior fail-safe needs an honest uncertainty that step 2
+must produce, and a REQUIRED Gate 3 (model-misspecification robustness) is
+recorded before any transfer claim. **Not yet begun:** Phase 4c collection and
+fitting proper (the learned spatial kappa field / learned sampling). Note that
+with the EKF and closed loop, endpoint/estimate errors under mismatch are now
+genuine `true` vs `model` results, not one-shared-model artifacts; the planning
+"endpoint error" figures above remain single-model planning artifacts.
