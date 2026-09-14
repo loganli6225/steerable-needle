@@ -1044,3 +1044,25 @@ of decisions made in earlier phases; do not quietly drop them.
   misspecification"; failure under any is itself a publishable-shaped limitation
   ("spatial fidelity is not robustly recoverable when the field departs from the
   learned prior's assumptions").
+- **Phase 4c step 2, conservative-serving spec: FROZEN 2026-09-13, before Gate 3
+  code exists** (`docs/four_c_conservative_serving_spec.md`). The step-2
+  diagnostic (committed `d558283`) killed the variance-quantifier route — the
+  capsule miscalibration is an irreducible ~5% bias in the dangerous
+  under-curvature direction, not a width problem (scatter/sigma < 1, |bias| 6-11x
+  scatter, flat N 40->320) — so sampling/RTO samples a biased MAP and no Bayesian
+  posterior is honest. The replacement serves the learned MEAN where data
+  supports it (it is ~95% of the way from the R29 prior to truth) and fails
+  toward HIGHER curvature only where coverage is low, never toward the prior
+  (which is the dangerous direction). Coverage is a TWO-part data-side signal:
+  depth density AND residual-whiteness-in-x — the second closes the density
+  blind spot (depth density over-reports coverage under an unmodeled lateral
+  dependence; the residuals go non-white there, so (ii) catches what (i) is
+  blind to). The two safety-posture parameters are frozen with pre-registration-
+  grade justifications: m = 20% (asymmetry of failure — under-curving
+  unrecoverable, over-curving recoverable; verified sub-cap in all non-capsule
+  tissue) and k_max = R15mm (the physical minimum turning radius, so the cap can
+  never under-curve relative to any real truth; the coincidence that R15 equals
+  this field's capsule is recorded as NON-load-bearing). Freezing before the
+  bench is the anti-circularity commitment: Gate 3 must grade this fixed
+  mechanism on a HELD-OUT misspecification (develop against (c), verdict on (a)
+  and (b)), never tune it to the bench.
