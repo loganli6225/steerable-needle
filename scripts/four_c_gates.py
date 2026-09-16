@@ -118,6 +118,11 @@ class Insertion:
     b: int
     n_steps: int
     phase: int  # measurement schedule offset in [0, INTERVAL)
+    start_y: float = 20.0  # entry depth. Default 20 (the perineal face) keeps
+    # every existing gate insertion byte-identical; multi-depth characterization
+    # arcs (Phase 4c serving) set this > 20 to reach the gland, which a constant-b
+    # arc cannot climb to from the face (turning circle caps the climb at ~y63).
+    # The fitter's forward model reads it, so a fit stays consistent with data.
 
 
 # --- forward rollouts (reuse `step`) ----------------------------------------
@@ -127,7 +132,7 @@ def traj_spatial(ins: Insertion, field) -> np.ndarray:
     """Roll out under a SPATIAL field (kappa depends on (x, y)) via `step`.
     Used for the truth (TissueField) and the fitted kappa(y)."""
     params = NeedleParams(kappa=BELIEF, kappa_field=field)
-    s = State(X0, 20.0, ins.theta0)
+    s = State(X0, ins.start_y, ins.theta0)
     ctrl = Control(v=V, b=ins.b)
     out = np.empty((ins.n_steps + 1, 2))
     out[0] = (s.x, s.y)
@@ -142,7 +147,7 @@ def traj_arclength(ins: Insertion, coords: np.ndarray, vals: np.ndarray) -> np.n
     constant field set from s = STEP_MM * step index."""
     sfield = _StepConst()
     params = NeedleParams(kappa=BELIEF, kappa_field=sfield)
-    s = State(X0, 20.0, ins.theta0)
+    s = State(X0, ins.start_y, ins.theta0)
     ctrl = Control(v=V, b=ins.b)
     out = np.empty((ins.n_steps + 1, 2))
     out[0] = (s.x, s.y)
