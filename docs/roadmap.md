@@ -1066,3 +1066,61 @@ of decisions made in earlier phases; do not quietly drop them.
   bench is the anti-circularity commitment: Gate 3 must grade this fixed
   mechanism on a HELD-OUT misspecification (develop against (c), verdict on (a)
   and (b)), never tune it to the bench.
+- **Phase 4c Gate 3 verdict: the conservative-serving mechanism FAILS both
+  held-out misspecifications, in different ways — a clean negative result, and
+  the one the gates were built to find.** Task 2 (`scripts/four_c_gate3_verdict.py`,
+  resumable) ran the frozen mechanism against held-out (a) sharp capsule and (b)
+  lateral x-tilt (develop-against (c) Gaussian bump), scored on the
+  PRE-REGISTERED job-2 criterion (feasibility decides: 0 collisions/OOB matching
+  the oracle; endpoint >=50% gap-closure for a clean pass; open as a specificity
+  contrast). Metric is OPEN-LOOP (closed loops censor at goal_tolerance=3.0).
+  Parameters were frozen before this ran and were NOT tuned to it — the failure
+  is the finding.
+
+  **Job 1 (recovery) is fine everywhere** (served capsule +4% (a), +12-13%
+  (b/c)), so the failure is downstream of the fit, not in it.
+
+  **(a) sharp capsule — near-miss FAIL.** constrained_passage: collisions
+  baseline 3/5 -> served 1/5 -> oracle 0/5; endpoint 20.1 -> 4.7 -> 2.9mm
+  (served closes 90% of the gap). The mechanism nearly handles a capsule sharper
+  than its GP length-scale — recovers it, cuts collisions to 1, nails endpoint —
+  but 1/5 collision > the oracle's 0 fails the 0-collision bar. This fail is
+  AMBIGUOUS between a mechanism boundary (~1mm sharpness) and a thin margin on
+  one frozen characterization draw; a bounded diagnostic addendum
+  (`scripts/four_c_gate3_addendum_a.py`, pool-seed robustness, changes zero
+  parameters) characterizes which — the verdict stays FAIL regardless.
+
+  **(b) x-tilt — the stronger finding: the spatial model is ACTIVELY HARMFUL
+  when its dimensionality is wrong.** constrained_passage: collisions baseline
+  3/5 -> served 5/5 -> oracle 0/5; endpoint 30.8 -> 32.8 -> 2.9mm (served closes
+  -7%). Served is WORSE than the flat baseline on both metrics. Fitting a kappa(y)
+  model to data from a laterally-structured field produces a field that misleads
+  the planner MORE than assuming a single number does. Mechanism, clean: kappa(y)
+  structurally cannot represent an x-dependence, AND the whiteness fail-safe
+  UNDER-FIRES because (b)'s +/-31% multiplicative tilt is weaker than the
+  |r|=0.81 generic gradient the test was validated on (item-5 caveat biting
+  exactly where flagged) — the served field is near-un-inflated (median R25.9,
+  10% < R20, with an R8602 near-straight fit-pathology patch), so the fail-safe
+  never engages and the distorted fit steers into collisions. No scalar
+  parameter fixes a missing dimension.
+
+  **Contrast self-correction (recorded, not buried).** Both worlds tripped the
+  pre-registered "open SEPARATES -> primary suspect" flag, but that criterion was
+  MIS-PREMISED: it assumed the served field affects only the capsule, when it
+  corrects all layers, and step 0 already showed the capsule is only 13% of the
+  open win. So served beating baseline on open (a: 2.9 vs 26.7, 0 collisions;
+  b: 16.1 vs 31.9) is EXPECTED, not suspect; read correctly as a pathology check
+  the served field is not pathological on open (<= baseline feasibility). The
+  flag is a false alarm from my own mis-specified criterion; it does not impugn
+  the primary, and the primary FAILs both worlds regardless. The criterion needs
+  re-specification (pathology-on-open, not equality-with-baseline).
+
+  **Net.** The mechanism does not robustly transfer under misspecification (the
+  spec's anticipated "publishable-shaped limitation"): a capsule sharper than the
+  length-scale is borderline (a), and lateral structure is not merely unhelped
+  but actively harmful (b). Direction chosen: accept the limitation as the honest
+  headline (option 1); the (a) addendum is a bounded diagnostic (option 2, does
+  not convert the verdict); extending the model class to kappa(x,y) to address (b)
+  is a new phase (option 3, FUTURE WORK). Frozen-on-one-pool means (a)'s fail is
+  ambiguous (mechanism vs tuning) while (b)'s is not (a missing dimension is not
+  a tuning surface).

@@ -318,6 +318,32 @@ raised to force it. The revert-to-prior fail-safe therefore cannot trust that
 posterior's variance as-is; producing an honest capsule uncertainty is now a
 named step-2 problem rather than a deployment surprise.
 
+**Gate 3 verdict (held-out misspecification): the conservative-serving mechanism
+does NOT robustly transfer, and against lateral structure it is ACTIVELY
+HARMFUL.** The mechanism was frozen (spec + parameters) and run against held-out
+(a) a capsule sharper than the model's length-scale and (b) a lateral (x)
+curvature tilt, on a PRE-REGISTERED pass criterion (feasibility decides: match
+the oracle's 0 collisions; endpoint >=50% gap-closure for a clean pass). Both
+FAIL, in different ways, and the second is the sharper result. (a): the served
+field nearly handles the sharp capsule — collisions cut 3/5 -> 1/5, open-loop
+endpoint 20 -> 4.7mm (90% of the way to the oracle's 2.9) — but one seed still
+collides where the oracle does not, so it fails the safety bar (ambiguous
+between a mechanism boundary and a thin margin on one draw; a bounded diagnostic
+addendum characterizes which, without moving the verdict). (b): fitting a
+kappa(y) model to data from a laterally-structured field produces a field that
+misleads the planner MORE than assuming a single scalar does — served collides
+5/5 vs the flat baseline's 3/5, endpoint 32.8 vs 30.8mm. So the spatial model is
+not merely unhelpful when its dimensionality is wrong, it is worse than no
+spatial model at all. The mechanism is clean: kappa(y) cannot represent an
+x-dependence, and the residual-whiteness fail-safe under-fires because the
+realistic +/-31% tilt is weaker than the strong gradient it was validated on
+(|r|=0.81), so it never engages. This is a genuine `true`-vs-`model` result (the
+misspecified field drives the simulator; the planner uses the learned/served
+field), and it is the honest boundary of Phase 4c: a learned depth-only
+curvature field transfers only when the true field is depth-only and not much
+sharper than the model's smoothing scale. Extending to kappa(x,y) is future work.
+Regenerable by `scripts/four_c_gate3_verdict.py`.
+
 ## Falsifiable sub-claims to test later
 
 The classical comparison above is settled. These remain open — all on the
