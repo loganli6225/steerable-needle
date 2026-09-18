@@ -327,9 +327,11 @@ the oracle's 0 collisions; endpoint >=50% gap-closure for a clean pass). Both
 FAIL, in different ways, and the second is the sharper result. (a): the served
 field nearly handles the sharp capsule — collisions cut 3/5 -> 1/5, open-loop
 endpoint 20 -> 4.7mm (90% of the way to the oracle's 2.9) — but one seed still
-collides where the oracle does not, so it fails the safety bar (ambiguous
-between a mechanism boundary and a thin margin on one draw; a bounded diagnostic
-addendum characterizes which, without moving the verdict). (b): fitting a
+collides where the oracle does not, so it fails the safety bar. A bounded
+diagnostic addendum (pool-seed robustness, zero parameters changed) resolves
+this: served collides exactly 1/5 on all three characterization draws, so it is
+a stable mechanism boundary at a capsule sharpness near the model's smoothing
+length-scale, not a thin-margin artifact — the verdict is unchanged either way. (b): fitting a
 kappa(y) model to data from a laterally-structured field produces a field that
 misleads the planner MORE than assuming a single scalar does — served collides
 5/5 vs the flat baseline's 3/5, endpoint 32.8 vs 30.8mm. So the spatial model is

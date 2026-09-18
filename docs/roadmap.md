@@ -1084,11 +1084,18 @@ of decisions made in earlier phases; do not quietly drop them.
   baseline 3/5 -> served 1/5 -> oracle 0/5; endpoint 20.1 -> 4.7 -> 2.9mm
   (served closes 90% of the gap). The mechanism nearly handles a capsule sharper
   than its GP length-scale — recovers it, cuts collisions to 1, nails endpoint —
-  but 1/5 collision > the oracle's 0 fails the 0-collision bar. This fail is
-  AMBIGUOUS between a mechanism boundary (~1mm sharpness) and a thin margin on
-  one frozen characterization draw; a bounded diagnostic addendum
-  (`scripts/four_c_gate3_addendum_a.py`, pool-seed robustness, changes zero
-  parameters) characterizes which — the verdict stays FAIL regardless.
+  but 1/5 collision > the oracle's 0 fails the 0-collision bar. The bounded
+  diagnostic addendum (`scripts/four_c_gate3_addendum_a.py`, pool-seed
+  robustness, changes ZERO parameters) RESOLVES the mechanism-vs-margin
+  ambiguity: served collides exactly 1/5 on all three characterization draws
+  (pool seeds 2/3/4; endpoint stable ~oracle), so the single collision is a
+  STABLE MECHANISM PROPERTY, not a thin-margin artifact of one draw. The
+  transfer boundary sits at a capsule sharpness near the served field's GP
+  length-scale (the 1mm-transition capsule is sharper than the 3mm smoothing can
+  resolve, leaving a residual under-curvature that reliably tips one seed). The
+  addendum rules out the draw-artifact explanation ONLY; it does not test whether
+  a different frozen m would remove the collision — that would be tuning-to-pass.
+  Verdict stays FAIL regardless.
 
   **(b) x-tilt — the stronger finding: the spatial model is ACTIVELY HARMFUL
   when its dimensionality is wrong.** constrained_passage: collisions baseline
